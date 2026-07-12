@@ -1,41 +1,66 @@
+# Vegas Total Solution Doc
 
-# GreenMetal Automation Suite
+Commercial-grade internal document automation platform foundation for Vegas Inc.
 
-## 포함 기능
-- DQ Generator
-- Word 템플릿 직접 선택
-- URS PDF 직접 선택
-- CLOVA OCR 연동
-- 시작/종료 요구사항 번호 범위 추출
-- OCR 결과를 Word 표로 삽입
-- Windows 설치 프로그램 자동 빌드
-- 설치 중 바탕화면 바로가기 선택
+> Existing GreenMetal Automation Suite business behavior is preserved in `src/legacy_main.py` for reference only. The active application entry point is now the plugin-based Vegas Total Solution Doc shell.
 
-## Word 템플릿 필수 태그
-- `##로고##`
-- `##문서번호##`
-- `##버전번호##`
-- `##장비명##`
-- `##작성자##`
-- `##작성일##`
-- `##작성자직위##`
-- `##업체명##`
-- `##OCR요구사항##`
+## Foundation delivered
 
-## 설치파일 만들기
-1. 이 ZIP의 내용을 GitHub 저장소 최상위에 업로드합니다.
-2. GitHub 저장소의 **Actions** 탭으로 이동합니다.
-3. **Build Windows Installer**를 선택합니다.
-4. **Run workflow**를 누릅니다.
-5. 완료 후 Artifacts의 `GreenMetal-Automation-Suite-Installer`를 다운로드합니다.
-6. 압축 안의 `GreenMetal_Automation_Suite_Setup.exe`가 최종 설치파일입니다.
+- PySide6 desktop shell with left navigation and right plugin workspace.
+- Plugin contract, loader, registry, and manager with duplicate-ID rejection, deterministic ordering, and broken-plugin isolation.
+- Placeholder plugins only for Manual Generator, DQ Generator, IQ Generator, OQ Generator, PQ Generator, URS OCR, PLC Generator, Alarm Generator, Excel Helper, and Settings.
+- Core services for safe non-secret configuration, rotating daily logging, PyInstaller-compatible resource resolution, safe theming, exception handling, application context, and type-keyed dependency injection.
+- Pytest startup and plugin-loading tests.
 
-## CLOVA OCR
-프로그램에서 `OCR 설정`을 누르고 다음 값을 입력합니다.
-- OCR Invoke URL
-- X-OCR-SECRET
+## Architecture
 
-Secret Key는 GitHub에 올리지 말고 프로그램 설정창에서만 입력하세요.
+```text
+src/vegas_doc/
+  app/              # application entry point and composition
+  core/             # infrastructure services
+  plugins/          # plugin framework
+  builtin_plugins/  # installed placeholder modules
+  services/         # future service abstractions
+  ui/               # Qt shell UI
+  resources/        # packaged resources
+  config/           # defaults and config types
+  models/           # future dataclasses/domain models
+  utils/            # utility helpers
+tests/              # automated tests
+docs/               # architecture notes
+scripts/            # automation scripts
+```
 
-## 주의
-OCR 표 구조는 실제 URS PDF 양식에 따라 조정이 필요할 수 있습니다. 첫 샘플 PDF로 테스트한 뒤 번호/제목 추출 규칙을 보완하는 방식으로 개발합니다.
+## Development
+
+```bash
+python -m venv .venv
+.venv\\Scripts\\activate
+python -m pip install -e .[dev]
+pytest
+python -m vegas_doc.app.main
+```
+
+## Configuration and secrets
+
+Configuration is JSON and non-secret only. Missing, empty, malformed, or non-object user configuration falls back to defaults and is logged when a logger is available. Runtime files are written to a Windows-writable per-user application data directory, never to the installed application directory. Runtime logs are written under `logs/yyyy-mm-dd.log` with UTF-8 `RotatingFileHandler`. Secrets must be stored through an approved secret store in future feature work, never in config files or the repository.
+
+## Phase 2 DQ domain foundation
+
+Phase 2 adds provider-neutral OCR contracts, document extraction contracts, URS requirement models, DQ mapping models, and versioned JSON project persistence. It remains domain/service-only: no UI workflow, CLOVA HTTP integration, OCR/parsing/classification/mapping algorithms, or Word generation is implemented. See `docs/phase2_dq_domain.md`.
+
+## DQ Generator end-to-end workflow
+
+1. Clone the repository and checkout `feature/dq-ocr-end-to-end`.
+2. Run `scripts\setup_dev.bat` on Windows with Python 3.12.
+3. Start the app with `scripts\run_dev.bat`.
+4. Open **Settings**, enter the NAVER CLOVA Invoke URL, timeout, and secret key. The URL can also come from `VEGAS_CLOVA_INVOKE_URL`; the secret can come from `VEGAS_CLOVA_SECRET_KEY`. Secrets are stored with keyring and are never written to project files.
+5. Use **Test Connection** to send a generated readable test image.
+6. Open **DQ Generator**, enter project information, import a PDF/PNG/JPG/JPEG/TIF/TIFF URS source, run extraction, review/edit requirements and responses, save/reopen `.vdqproj`, then generate a `.docx`.
+7. If OCR fails for one page, continue reviewing successful pages and retry after fixing settings. Korean user-facing errors appear in the UI; English technical details are written to logs.
+
+Troubleshooting: verify Python 3.12, run `scripts\test.bat`, confirm keyring access, ensure the output directory is writable, and use searchable PDFs where possible to avoid unnecessary OCR.
+
+## Not implemented in this foundation
+
+No DQ generation, OCR, Word, PDF, Excel, PLC, alarm, or document-generation business behavior is implemented here.
