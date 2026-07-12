@@ -55,7 +55,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { Write-Error "::error title=Baseline PyInstaller failed::The pre-optimization build failed." }
           Remove-Item -Recurse -Force dist/Vegas_Total_Solution_Doc -ErrorAction SilentlyContinue
           Copy-Item -Recurse dist/before/Vegas_Total_Solution_Doc dist/Vegas_Total_Solution_Doc
-          $iscc = Join-Path $env:ProgramFiles' (x86)' "Inno Setup 6/ISCC.exe"
+          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6/ISCC.exe"
           if (-not (Test-Path $iscc)) { $iscc = Join-Path $env:ProgramFiles "Inno Setup 6/ISCC.exe" }
           & $iscc "installer/Vegas_Total_Solution_Doc.iss"
           if ($LASTEXITCODE -ne 0) { Write-Error "::error title=Baseline Inno Setup failed::The baseline installer failed." }
@@ -69,6 +69,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { Write-Error "::error title=Optimized PyInstaller failed::The optimized spec build failed." }
           .scriptsuild_installer.bat
           if ($LASTEXITCODE -ne 0) { Write-Error "::error title=Optimized Inno Setup failed::The optimized installer failed." }
+          $installer = "dist/installer/Vegas_Total_Solution_Doc_Setup.exe"
+          $hash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  Vegas_Total_Solution_Doc_Setup.exe" | Set-Content dist/installer/checksums.txt -Encoding ascii
+          [ordered]@{ product = "Vegas Total Solution Doc"; version = "0.1.0"; artifact = "Vegas_Total_Solution_Doc_Setup.exe"; sha256 = $hash; commit = "${{ github.sha }}"; workflow_run = "${{ github.run_id }}" } | ConvertTo-Json | Set-Content dist/installer/build_manifest.json -Encoding utf8
           python scripts/package_size_report.py --after
 
       - name: Compare package sizes and print largest files
