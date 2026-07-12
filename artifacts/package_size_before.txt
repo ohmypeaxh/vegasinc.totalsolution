@@ -1,0 +1,2 @@
+This file is replaced with exact measurements by the Windows GitHub Actions baseline build.
+No estimated size is recorded in source control.
