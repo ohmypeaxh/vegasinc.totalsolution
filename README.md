@@ -64,3 +64,27 @@ Troubleshooting: verify Python 3.12, run `scripts\test.bat`, confirm keyring acc
 ## Not implemented in this foundation
 
 No DQ generation, OCR, Word, PDF, Excel, PLC, alarm, or document-generation business behavior is implemented here.
+
+
+## UI preview screenshots
+
+The preview workflow renders the real PySide6 application widgets with Qt's offscreen
+platform. It uses synthetic project and URS data, masks credentials, and uploads PNG
+screenshots without calling CLOVA OCR.
+
+### GitHub
+
+1. Open **Actions**.
+2. Select **Generate UI Previews**.
+3. Select **Run workflow**.
+4. Download the **Vegas-Total-Solution-Doc-UI-Previews** artifact after the run completes.
+
+### Local Windows
+
+Install the development dependencies, then run:
+
+```bat
+scripts\preview_ui.bat
+```
+
+The screenshots are written to `artifacts/ui-previews/`.
