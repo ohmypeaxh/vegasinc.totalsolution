@@ -5,11 +5,12 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, Qt, QThread, Signal
-from PySide6.QtWidgets import QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QTableView, QTextEdit, QVBoxLayout, QWidget
+from PySide6.QtCore import QAbstractTableModel, QDate, QModelIndex, QObject, Qt, QThread, Signal
+from PySide6.QtWidgets import (QComboBox, QDateEdit, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QScrollArea, QTableView, QTextEdit, QVBoxLayout, QWidget)
 
 from vegas_doc.core.application_context import ApplicationContext
 from vegas_doc.core.config_manager import ConfigManager
+from vegas_doc.models.dq_document_data import DQDocumentData
 from vegas_doc.models.dq_mapping import DQResponse
 from vegas_doc.models.extraction import ExtractionPolicy
 from vegas_doc.models.project import DQProject, PROJECT_SCHEMA_VERSION, ProjectInfo, TemplateSettings
@@ -22,6 +23,7 @@ from vegas_doc.services.dq_processing import DQProjectValidator, DQSuggestionSer
 from vegas_doc.services.ocr import ProviderOCRService
 from vegas_doc.services.project_persistence import DQProjectRepository
 from vegas_doc.services.secrets import KeyringSecretStore
+from vegas_doc.ui.widgets.file_path_input import FilePathInput
 
 
 class DQExtractionWorker(QObject):
@@ -148,56 +150,177 @@ class DQGeneratorWidget(QWidget):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
+        root = QVBoxLayout(self)
         title = QLabel("DQ Generator")
         title.setObjectName("PageTitle")
-        layout.addWidget(title)
-        form = QFormLayout()
-        self.project_name = QLineEdit()
+        root.addWidget(title)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+
+        basic_group = QGroupBox("A. 기본 정보")
+        basic_form = QFormLayout(basic_group)
         self.document_number = QLineEdit()
-        self.source_path = QLineEdit()
-        self.template_path = QLineEdit(str(Path("templates/default_dq_template.docx")))
-        self.output_path = QLineEdit(str(Path("output/dq_output.docx")))
-        form.addRow("Project", self.project_name)
-        form.addRow("Document No.", self.document_number)
-        form.addRow("URS/PDF/Image", self.source_path)
-        form.addRow("Template", self.template_path)
-        form.addRow("Output", self.output_path)
-        layout.addLayout(form)
-        buttons = QHBoxLayout()
-        for text, slot in [("Import", self.import_file), ("Extract/Retry", self.start_extraction), ("Cancel", self.cancel), ("Save Project", self.save_project), ("Open Project", self.open_project), ("Generate", self.generate_docx)]:
-            button = QPushButton(text)
-            button.clicked.connect(slot)
-            buttons.addWidget(button)
-        buttons.addStretch()
-        layout.addLayout(buttons)
-        self.status = QLabel("대기 중")
+        self.version_number = QLineEdit("1.0")
+        self.equipment_name = QLineEdit()
+        self.project_name = self.equipment_name
+        self.author_name = QLineEdit()
+        self.author_date = QDateEdit(QDate.currentDate())
+        self.author_date.setCalendarPopup(True)
+        self.author_date.setDisplayFormat("yyyy-MM-dd")
+        self.author_position = QComboBox()
+        self.author_position.setEditable(True)
+        self.author_position.addItems(["대표이사", "부장", "차장", "과장", "대리", "사원"])
+        self.vendor_name = QLineEdit()
+        for label, widget in (
+            ("문서번호 *", self.document_number),
+            ("버전번호 *", self.version_number),
+            ("장비명 *", self.equipment_name),
+            ("작성자 *", self.author_name),
+            ("작성일 *", self.author_date),
+            ("작성자 직위 *", self.author_position),
+            ("업체명 *", self.vendor_name),
+        ):
+            basic_form.addRow(label, widget)
+        content_layout.addWidget(basic_group)
+
+        files_group = QGroupBox("B. 파일 첨부")
+        files_form = QFormLayout(files_group)
+        self.logo_input = FilePathInput(
+            extensions=(".png", ".jpg", ".jpeg"),
+            dialog_filter="Logo images (*.png *.jpg *.jpeg)",
+            drop_text="로고 파일을 이곳에 끌어 놓으세요.",
+        )
+        self.template_input = FilePathInput(
+            extensions=(".docx",),
+            dialog_filter="Word template (*.docx)",
+            drop_text="Word 템플릿을 이곳에 끌어 놓으세요.",
+        )
+        self.urs_input = FilePathInput(
+            extensions=(".pdf",),
+            dialog_filter="URS PDF (*.pdf)",
+            drop_text="URS PDF 파일을 이곳에 끌어 놓으세요.",
+        )
+        self.logo_path = self.logo_input.line_edit
+        self.template_path = self.template_input.line_edit
+        self.source_path = self.urs_input.line_edit
+        files_form.addRow("회사 로고 *", self.logo_input)
+        files_form.addRow("Word 템플릿 *", self.template_input)
+        files_form.addRow("URS PDF *", self.urs_input)
+        content_layout.addWidget(files_group)
+
+        range_group = QGroupBox("C. URS 추출 범위")
+        range_form = QFormLayout(range_group)
+        self.start_requirement = QLineEdit("6.4")
+        self.end_requirement = QLineEdit("6.8")
+        range_form.addRow("시작 요구사항 번호 *", self.start_requirement)
+        range_form.addRow("종료 요구사항 번호 *", self.end_requirement)
+        analyze = QPushButton("URS 분석")
+        analyze.clicked.connect(self.start_extraction)
+        range_form.addRow("", analyze)
+        content_layout.addWidget(range_group)
+
+        review_group = QGroupBox("D. OCR 결과 미리보기")
+        review_layout = QVBoxLayout(review_group)
         self.page_review = QTextEdit()
-        self.page_review.setPlaceholderText("페이지 텍스트 검토/수정 영역")
+        self.page_review.setPlaceholderText("PDF/OCR 원문 검토 및 수정 영역")
         self.model = RequirementTableModel()
         self.table = QTableView()
         self.table.setModel(self.model)
         self.table.setSortingEnabled(True)
-        layout.addWidget(self.status)
-        layout.addWidget(self.page_review, 1)
-        layout.addWidget(self.table, 3)
+        review_layout.addWidget(self.page_review)
+        review_layout.addWidget(self.table)
+        content_layout.addWidget(review_group)
+
+        output_group = QGroupBox("E. 출력 설정")
+        output_form = QFormLayout(output_group)
+        self.output_directory_input = FilePathInput(mode="directory", drop_text="결과 저장 폴더")
+        self.output_directory_input.set_path(Path("output"))
+        self.output_path = self.output_directory_input.line_edit
+        self.output_filename = QLineEdit()
+        self.output_filename.setPlaceholderText("미입력 시 문서번호_장비명_DQ_작성일.docx")
+        output_form.addRow("저장 위치 *", self.output_directory_input)
+        output_form.addRow("결과 파일명", self.output_filename)
+        content_layout.addWidget(output_group)
+
+        action_row = QHBoxLayout()
+        for text, slot in (
+            ("OCR 결과 검토", lambda: self.table.setFocus()),
+            ("Save Project", self.save_project),
+            ("Open Project", self.open_project),
+            ("입력값 초기화", self.reset_inputs),
+            ("작업 취소", self.cancel),
+        ):
+            button = QPushButton(text)
+            button.clicked.connect(slot)
+            action_row.addWidget(button)
+        generate = QPushButton("Word 문서 생성")
+        generate.setObjectName("PrimaryAction")
+        generate.clicked.connect(self.generate_docx)
+        action_row.addWidget(generate)
+        content_layout.addLayout(action_row)
+
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        self.status = QLabel("대기 중")
+        content_layout.addWidget(self.progress)
+        content_layout.addWidget(self.status)
+        content_layout.addStretch()
+        scroll.setWidget(content)
+        root.addWidget(scroll)
+
+    def current_document_data(self) -> DQDocumentData:
+        return DQDocumentData(
+            logo_path=Path(self.logo_path.text().strip()),
+            template_path=Path(self.template_path.text().strip()),
+            urs_pdf_path=Path(self.source_path.text().strip()),
+            document_number=self.document_number.text().strip(),
+            version_number=self.version_number.text().strip(),
+            equipment_name=self.equipment_name.text().strip(),
+            author_name=self.author_name.text().strip(),
+            author_date=self.author_date.date().toPython(),
+            author_position=self.author_position.currentText().strip(),
+            vendor_name=self.vendor_name.text().strip(),
+            start_requirement=self.start_requirement.text().strip(),
+            end_requirement=self.end_requirement.text().strip(),
+            output_directory=Path(self.output_directory_input.path()),
+            output_filename=self.output_filename.text().strip(),
+        )
+
+    def reset_inputs(self) -> None:
+        for field in (self.document_number, self.equipment_name, self.author_name, self.vendor_name, self.logo_path, self.template_path, self.source_path, self.output_filename):
+            field.clear()
+        self.version_number.setText("1.0")
+        self.author_date.setDate(QDate.currentDate())
+        self.start_requirement.setText("6.4")
+        self.end_requirement.setText("6.8")
+        self.model.set_items((), {})
+        self.page_review.clear()
+        self.progress.setValue(0)
+        self.status.setText("입력값을 초기화했습니다.")
+        self._dirty = False
 
     def import_file(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "URS/PDF/Image 선택", "", "Documents (*.pdf *.png *.jpg *.jpeg *.tif *.tiff)")
-        if path:
-            self.source_path.setText(path)
-            self._dirty = True
+        self.urs_input.browse()
+        self._dirty = bool(self.source_path.text().strip())
 
     def start_extraction(self) -> None:
-        source = Path(self.source_path.text().strip())
-        if not source.exists():
-            QMessageBox.warning(self, "입력 확인", "가져올 URS/PDF/Image 파일을 선택해 주세요.")
+        data = self.current_document_data()
+        range_errors = [error for error in data.validation_errors(require_existing_files=False) if "요구사항 번호" in error]
+        source = data.urs_pdf_path
+        if source.suffix.lower() != ".pdf" or not source.is_file():
+            range_errors.append("유효한 URS PDF 파일을 선택해 주세요.")
+        if range_errors:
+            QMessageBox.warning(self, "입력 확인", "\n".join(dict.fromkeys(range_errors)))
             return
         self._thread = QThread()
         self._worker = DQExtractionWorker(source, self._context)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
-        self._worker.progress.connect(lambda _value, message: self.status.setText(message))
+        self._worker.progress.connect(self._on_progress)
         self._worker.completed.connect(self._on_extracted)
         self._worker.failed.connect(self._on_failed)
         self._thread.start()
@@ -206,11 +329,16 @@ class DQGeneratorWidget(QWidget):
         if self._worker:
             self._worker.cancel()
 
+    def _on_progress(self, value: int, message: str) -> None:
+        self.progress.setValue(value)
+        self.status.setText(message)
+
     def _on_extracted(self, payload: tuple) -> None:
         self._extraction, requirements, responses, self._mappings = payload
         self.model.set_items(requirements, responses)
         if self._extraction and self._extraction.pages:
             self.page_review.setPlainText(self._extraction.pages[0].reviewed_text or self._extraction.pages[0].normalized_text or self._extraction.pages[0].original_text)
+        self.progress.setValue(100)
         self.status.setText("추출 및 분석이 완료되었습니다.")
         self._dirty = True
         self._stop_thread()
