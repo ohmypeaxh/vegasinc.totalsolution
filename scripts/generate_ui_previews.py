@@ -198,5 +198,11 @@ def generate_previews() -> None:
 
 
 if __name__ == "__main__":
-    generate_previews()
+    import traceback
+
+    try:
+        generate_previews()
+    except Exception:
+        traceback.print_exc()
+        raise SystemExit(1)
     print(f"Generated {len(EXPECTED_SCREENSHOTS)} UI previews in {OUTPUT_DIRECTORY}")
