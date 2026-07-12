@@ -11,7 +11,7 @@ os.environ.pop("VEGAS_CLOVA_INVOKE_URL", None)
 os.environ.pop("VEGAS_CLOVA_SECRET_KEY", None)
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLineEdit
 
 from vegas_doc.app.main import create_main_window, get_or_create_application
 from vegas_doc.builtin_plugins.dq_generator import DQGeneratorWidget
@@ -109,7 +109,7 @@ def generate_previews() -> None:
     app = get_or_create_application(["generate-ui-previews"])
     app.setApplicationName("Vegas Total Solution Doc")
 
-    with TemporaryDirectory(prefix="vegas-ui-preview-") as temporary_directory:
+    with TemporaryDirectory(prefix="vegas-ui-preview-", ignore_cleanup_errors=True) as temporary_directory:
         context = build_application_context(data_dir=Path(temporary_directory))
         context.services.resolve(ThemeManager).apply(app)
         window = create_main_window(context)
@@ -169,7 +169,7 @@ def generate_previews() -> None:
             raise TypeError("Settings plugin did not provide the production SettingsWidget")
         settings_widget.url.setText("https://example.invalid/clova-ocr")
         settings_widget.secret.setText("preview-secret-is-masked")
-        settings_widget.secret.setEchoMode(settings_widget.secret.Password)
+        settings_widget.secret.setEchoMode(QLineEdit.EchoMode.Password)
         settings_widget.timeout.setValue(60)
         settings_widget.status.setText("미리보기용 값입니다. 실제 자격증명은 포함되지 않습니다.")
         _save_widget(window, "07_settings_ocr.png", app)
