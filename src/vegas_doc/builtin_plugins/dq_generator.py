@@ -361,8 +361,19 @@ class DQGeneratorWidget(QWidget):
             source_references=(Path(self.source_path.text()),) if self.source_path.text().strip() else (),
             extraction_results=(self._extraction,) if self._extraction else (),
             requirements=tuple(self.model.requirements),
+            corrections={
+                "version_number": self.version_number.text().strip(),
+                "author_name": self.author_name.text().strip(),
+                "author_date": self.author_date.date().toString("yyyy-MM-dd"),
+                "author_position": self.author_position.currentText().strip(),
+                "vendor_name": self.vendor_name.text().strip(),
+                "logo_path": self.logo_path.text().strip(),
+                "start_requirement": self.start_requirement.text().strip(),
+                "end_requirement": self.end_requirement.text().strip(),
+                "output_filename": self.output_filename.text().strip(),
+            },
             mappings=tuple(self._mappings),
-            template_settings=TemplateSettings(Path(self.template_path.text()), Path(self.output_path.text()).parent),
+            template_settings=TemplateSettings(Path(self.template_path.text()), Path(self.output_directory_input.path())),
         )
 
     def save_project(self) -> None:
@@ -380,21 +391,50 @@ class DQGeneratorWidget(QWidget):
             self.document_number.setText(project.project_info.project_id)
             if project.source_references:
                 self.source_path.setText(str(project.source_references[0]))
+            values = project.corrections
+            self.version_number.setText(values.get("version_number", "1.0"))
+            self.author_name.setText(values.get("author_name", ""))
+            if values.get("author_date"):
+                self.author_date.setDate(QDate.fromString(values["author_date"], "yyyy-MM-dd"))
+            self.author_position.setCurrentText(values.get("author_position", ""))
+            self.vendor_name.setText(values.get("vendor_name", ""))
+            self.logo_path.setText(values.get("logo_path", ""))
+            self.start_requirement.setText(values.get("start_requirement", "6.4"))
+            self.end_requirement.setText(values.get("end_requirement", "6.8"))
+            self.output_filename.setText(values.get("output_filename", ""))
+            if project.template_settings.template_path:
+                self.template_path.setText(str(project.template_settings.template_path))
+            if project.template_settings.output_directory:
+                self.output_directory_input.set_path(project.template_settings.output_directory)
             self.model.set_items(project.requirements, {mapping.source_requirement_ids[0]: mapping.dq_response for mapping in project.mappings if mapping.dq_response and mapping.source_requirement_ids})
             self._extraction = project.extraction_results[0] if project.extraction_results else None
             self._mappings = project.mappings
             self.status.setText("프로젝트를 열었습니다.")
 
     def generate_docx(self) -> None:
+        data = self.current_document_data()
         requirements = tuple(self.model.requirements)
         mappings = build_mappings(requirements, self.model.responses)
-        template = Path(self.template_path.text())
-        output = Path(self.output_path.text())
-        errors = DQProjectValidator().validate_for_generation(self.project_name.text(), requirements, mappings, template, output)
+        output = data.output_path()
+        errors = data.validation_errors()
+        errors.extend(DQProjectValidator().validate_for_generation(data.equipment_name, requirements, mappings, data.template_path, output))
         if errors:
-            QMessageBox.warning(self, "생성 전 확인", "\n".join(errors))
+            QMessageBox.warning(self, "생성 전 확인", "\n".join(dict.fromkeys(errors)))
             return
-        self._generator.generate(template, output, {"project_name": self.project_name.text(), "document_number": self.document_number.text()}, requirements, mappings)
+        context = {
+            "project_name": data.equipment_name,
+            "document_number": data.document_number,
+            "version_number": data.version_number,
+            "equipment_name": data.equipment_name,
+            "author_name": data.author_name,
+            "author_date": data.author_date.strftime("%Y-%m-%d"),
+            "author_position": data.author_position,
+            "vendor_name": data.vendor_name,
+        }
+        self.progress.setValue(80)
+        self.status.setText("Word 문서 생성 중...")
+        self._generator.generate(data.template_path, output, context, requirements, mappings)
+        self.progress.setValue(100)
         self.status.setText(f"DQ 문서를 생성했습니다: {output}")
         self._dirty = False
 
