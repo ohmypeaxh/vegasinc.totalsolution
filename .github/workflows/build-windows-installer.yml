@@ -12,9 +12,9 @@ permissions:
 
 jobs:
   build-windows-installer:
-    name: Test, build EXE, and package installer
+    name: Measure, optimize, and package Windows installer
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     defaults:
       run:
         shell: pwsh
@@ -29,109 +29,72 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install project dependencies
+      - name: Install dependencies
         run: |
           $ErrorActionPreference = "Stop"
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
-          if ($LASTEXITCODE -ne 0) { Write-Error "::error title=Dependency installation failed::Could not install project dependencies." }
 
-      - name: Run pytest
+      - name: Run tests
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
           $ErrorActionPreference = "Stop"
           python -m pytest -q
-          if ($LASTEXITCODE -ne 0) { Write-Error "::error title=Tests failed::Review this step's pytest output." }
 
-      - name: Build Windows executable with PyInstaller
-        run: |
-          $ErrorActionPreference = "Stop"
-          python -m PyInstaller --noconfirm --clean --windowed --name Vegas_Total_Solution_Doc --paths src --collect-all vegas_doc --collect-all PySide6 src/main.py
-          if ($LASTEXITCODE -ne 0) { Write-Error "::error title=PyInstaller failed::The Windows executable could not be built." }
-          $exe = "dist/Vegas_Total_Solution_Doc/Vegas_Total_Solution_Doc.exe"
-          if (-not (Test-Path -LiteralPath $exe)) { Write-Error "::error title=Executable missing::Expected $exe." }
-
-      - name: Install Inno Setup
+      - name: Install Inno Setup 6
         run: |
           $ErrorActionPreference = "Stop"
           choco install innosetup --no-progress -y
-          if ($LASTEXITCODE -ne 0) { Write-Error "::error title=Inno Setup installation failed::Chocolatey could not install Inno Setup." }
+          if ($LASTEXITCODE -ne 0) { Write-Error "::error title=Inno Setup installation failed::Chocolatey installation failed." }
 
-      - name: Create Inno Setup definition
+      - name: Build and measure baseline package
         run: |
           $ErrorActionPreference = "Stop"
-          New-Item -ItemType Directory -Force -Path installer | Out-Null
-          @'
-          #define MyAppName "Vegas Total Solution Doc"
-          #define MyAppVersion "0.1.0"
-          #define MyAppExeName "Vegas_Total_Solution_Doc.exe"
-
-          [Setup]
-          AppId={{1DAD13F1-148D-4B95-8D15-F4FEBD49676A}
-          AppName={#MyAppName}
-          AppVersion={#MyAppVersion}
-          DefaultDirName={autopf}\Vegas Total Solution Doc
-          DefaultGroupName={#MyAppName}
-          OutputDir=..\dist\installer
-          OutputBaseFilename=Vegas_Total_Solution_Doc_Setup
-          Compression=lzma2
-          SolidCompression=yes
-          ArchitecturesAllowed=x64compatible
-          ArchitecturesInstallIn64BitMode=x64compatible
-          WizardStyle=modern
-          UninstallDisplayIcon={app}\{#MyAppExeName}
-
-          [Files]
-          Source: "..\dist\Vegas_Total_Solution_Doc\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-          [Tasks]
-          Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"
-
-          [Icons]
-          Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-          Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
-
-          [Run]
-          Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
-          '@ | Set-Content -LiteralPath installer/Vegas_Total_Solution_Doc.iss -Encoding utf8
-
-      - name: Build Inno Setup installer
-        run: |
-          $ErrorActionPreference = "Stop"
-          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6/ISCC.exe"
-          if (-not (Test-Path -LiteralPath $iscc)) { Write-Error "::error title=ISCC missing::Inno Setup compiler was not found at $iscc." }
+          python -m PyInstaller --noconfirm --clean --windowed --name Vegas_Total_Solution_Doc --distpath dist/before --workpath build/before --specpath build/before --paths src --collect-all vegas_doc --collect-all PySide6 src/main.py
+          if ($LASTEXITCODE -ne 0) { Write-Error "::error title=Baseline PyInstaller failed::The pre-optimization build failed." }
+          Remove-Item -Recurse -Force dist/Vegas_Total_Solution_Doc -ErrorAction SilentlyContinue
+          Copy-Item -Recurse dist/before/Vegas_Total_Solution_Doc dist/Vegas_Total_Solution_Doc
+          $iscc = Join-Path $env:ProgramFiles' (x86)' "Inno Setup 6/ISCC.exe"
+          if (-not (Test-Path $iscc)) { $iscc = Join-Path $env:ProgramFiles "Inno Setup 6/ISCC.exe" }
           & $iscc "installer/Vegas_Total_Solution_Doc.iss"
-          if ($LASTEXITCODE -ne 0) { Write-Error "::error title=Installer build failed::ISCC failed to compile the installer." }
-          $installer = "dist/installer/Vegas_Total_Solution_Doc_Setup.exe"
-          if (-not (Test-Path -LiteralPath $installer)) { Write-Error "::error title=Installer missing::Expected $installer." }
+          if ($LASTEXITCODE -ne 0) { Write-Error "::error title=Baseline Inno Setup failed::The baseline installer failed." }
+          Move-Item -Force dist/installer/Vegas_Total_Solution_Doc_Setup.exe dist/installer/Vegas_Total_Solution_Doc_Setup_Before.exe
+          python scripts/package_size_report.py --distribution dist/before/Vegas_Total_Solution_Doc --installer dist/installer/Vegas_Total_Solution_Doc_Setup_Before.exe
 
-      - name: Generate checksums and build manifest
+      - name: Build optimized one-folder package
         run: |
           $ErrorActionPreference = "Stop"
-          $outputDirectory = "dist/installer"
-          $installer = Join-Path $outputDirectory "Vegas_Total_Solution_Doc_Setup.exe"
-          $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  Vegas_Total_Solution_Doc_Setup.exe" | Set-Content -LiteralPath (Join-Path $outputDirectory "checksums.txt") -Encoding ascii
-          [ordered]@{
-            product = "Vegas Total Solution Doc"
-            version = "0.1.0"
-            artifact = "Vegas_Total_Solution_Doc_Setup.exe"
-            sha256 = $hash
-            commit = "${{ github.sha }}"
-            workflow_run = "${{ github.run_id }}"
-            built_at_utc = (Get-Date).ToUniversalTime().ToString("o")
-          } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $outputDirectory "build_manifest.json") -Encoding utf8
+          .scriptsuild_exe.bat
+          if ($LASTEXITCODE -ne 0) { Write-Error "::error title=Optimized PyInstaller failed::The optimized spec build failed." }
+          .scriptsuild_installer.bat
+          if ($LASTEXITCODE -ne 0) { Write-Error "::error title=Optimized Inno Setup failed::The optimized installer failed." }
+          python scripts/package_size_report.py --after
 
-      - name: Verify release artifact set
+      - name: Compare package sizes and print largest files
         run: |
           $ErrorActionPreference = "Stop"
-          $required = @("dist/installer/Vegas_Total_Solution_Doc_Setup.exe", "dist/installer/checksums.txt", "dist/installer/build_manifest.json")
-          $missing = $required | Where-Object { -not (Test-Path -LiteralPath $_) }
-          if ($missing) { Write-Error "::error title=Artifact verification failed::Missing required files: $($missing -join ', ')" }
-          Get-ChildItem -LiteralPath "dist/installer" | Format-Table Name, Length
+          Get-Content artifacts/package_size_before.txt
+          Get-Content artifacts/package_size_after.txt
+          $before = [double]((Select-String "Installer MB:" artifacts/package_size_before.txt).Line -replace "[^0-9.]","")
+          $after = [double]((Select-String "Installer MB:" artifacts/package_size_after.txt).Line -replace "[^0-9.]","")
+          $reduction = $before - $after
+          $percent = if ($before -gt 0) { ($reduction / $before) * 100 } else { 0 }
+          "Installer reduction: {0:N2} MB ({1:N2} percent)" -f $reduction, $percent
+          if ($after -gt 120) { Write-Warning "::warning title=Installer exceeds preferred threshold::Installer is $after MB; preferred threshold is 120 MB." }
+          if ($after -gt 160) { Write-Error "::error title=Installer size guard failed::Installer is $after MB, above the 160 MB hard limit." }
+          Get-ChildItem -File -Recurse dist/Vegas_Total_Solution_Doc | Sort-Object Length -Descending | Select-Object -First 10 FullName,Length | Format-Table
 
-      - name: Upload Windows installer artifact
+      - name: Verify release files
+        run: |
+          $ErrorActionPreference = "Stop"
+          $required = @("dist/installer/Vegas_Total_Solution_Doc_Setup.exe", "dist/installer/checksums.txt", "dist/installer/build_manifest.json", "artifacts/package_size_before.txt", "artifacts/package_size_after.txt")
+          $missing = $required | Where-Object { -not (Test-Path $_) }
+          if ($missing) { Write-Error "::error title=Release verification failed::Missing: $($missing -join ', ')" }
+          $hash = (Get-FileHash dist/installer/Vegas_Total_Solution_Doc_Setup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  Vegas_Total_Solution_Doc_Setup.exe" | Set-Content dist/installer/checksums.txt -Encoding ascii
+
+      - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
           name: Vegas-Total-Solution-Doc-Installer
@@ -139,5 +102,15 @@ jobs:
             dist/installer/Vegas_Total_Solution_Doc_Setup.exe
             dist/installer/checksums.txt
             dist/installer/build_manifest.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload package size report
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-size-report
+          path: |
+            artifacts/package_size_before.txt
+            artifacts/package_size_after.txt
           if-no-files-found: error
           retention-days: 30
