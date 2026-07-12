@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget
 
@@ -10,6 +12,7 @@ from vegas_doc.core.config_manager import ConfigManager
 from vegas_doc.plugins.plugin import Plugin, PluginMetadata
 from vegas_doc.services.clova_ocr import ClovaOCRProvider, ClovaOCRSettings
 from vegas_doc.services.secrets import KeyringSecretStore
+from vegas_doc.version import BUILD_INFO
 
 
 class ConnectionTestWorker(QThread):
@@ -60,6 +63,21 @@ class SettingsWidget(QWidget):
         title = QLabel("Settings")
         title.setObjectName("PageTitle")
         layout.addWidget(title)
+        product_form = QFormLayout()
+        for label, value in (
+            ("Product", BUILD_INFO.product),
+            ("Version", BUILD_INFO.version),
+            ("Build", BUILD_INFO.build_number),
+            ("Build Date", BUILD_INFO.build_date),
+            ("Commit", BUILD_INFO.commit),
+            ("Install Path", str(sys.executable)),
+            ("Config Path", str(context.data_dir / context.settings.config_filename)),
+            ("Log Path", str(context.data_dir / context.settings.log_directory_name)),
+        ):
+            field = QLineEdit(value)
+            field.setReadOnly(True)
+            product_form.addRow(label, field)
+        layout.addLayout(product_form)
         form = QFormLayout()
         self.provider = QLineEdit("NAVER CLOVA OCR")
         self.provider.setReadOnly(True)
