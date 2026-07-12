@@ -34,10 +34,13 @@ def write_report(label: str, distribution: Path, installer: Path, output: Path) 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--after", action="store_true")
+    parser.add_argument("--distribution", type=Path)
+    parser.add_argument("--installer", type=Path)
     args = parser.parse_args()
+    label = "after" if args.after else "before"
     write_report(
-        "after" if args.after else "before",
-        Path("dist/Vegas_Total_Solution_Doc"),
-        Path("dist/installer/Vegas_Total_Solution_Doc_Setup.exe"),
+        label,
+        args.distribution or Path("dist/Vegas_Total_Solution_Doc"),
+        args.installer or Path("dist/installer/Vegas_Total_Solution_Doc_Setup.exe"),
         Path("artifacts/package_size_after.txt" if args.after else "artifacts/package_size_before.txt"),
     )
