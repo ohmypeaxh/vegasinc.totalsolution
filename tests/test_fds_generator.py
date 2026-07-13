@@ -144,5 +144,8 @@ def test_fds_widget_contains_generator_and_rules_tabs(tmp_path: Path, qapp) -> N
     assert widget.logo_input.acceptDrops()
     assert widget.write_date.calendarPopup()
     assert widget.write_date.displayFormat() == "yyyy.MM.dd"
+    assert widget.document_number.text() == "MD-FDS-##01-26"
+    assert "Pass Box - PB" in widget.document_number_help.text()
+    assert "Clean Booth - CB" in widget.document_number_help.text()
     assert widget.review_table.minimumHeight() >= 480
     assert context.services.resolve(ConfigManager).load()["fds_transformation_rules"][0]["target_ending"] == "테스트 규칙으로 제작한다."

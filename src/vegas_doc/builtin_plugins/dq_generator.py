@@ -240,7 +240,7 @@ class DQGeneratorWidget(QWidget):
         basic_group = QGroupBox("A. 기본 정보")
         basic_form = QFormLayout(basic_group)
         self.document_number = QLineEdit()
-        self.version_number = QLineEdit("1.0")
+        self.version_number = QLineEdit("00")
         self.equipment_name = QLineEdit()
         self.project_name = self.equipment_name
         self.author_name = QLineEdit()
@@ -387,7 +387,7 @@ class DQGeneratorWidget(QWidget):
     def reset_inputs(self) -> None:
         for field in (self.document_number, self.equipment_name, self.author_name, self.author_position, self.vendor_name, self.logo_path, self.template_path, self.source_path, self.output_filename):
             field.clear()
-        self.version_number.setText("1.0")
+        self.version_number.setText("00")
         self.author_date.setDate(QDate.currentDate())
         self.start_requirement.setText("6.4")
         self.end_requirement.setText("6.8")
@@ -526,7 +526,7 @@ class DQGeneratorWidget(QWidget):
             if project.source_references:
                 self.source_path.setText(str(project.source_references[0]))
             values = project.corrections
-            self.version_number.setText(values.get("version_number", "1.0"))
+            self.version_number.setText(values.get("version_number", "00"))
             self.author_name.setText(values.get("author_name", ""))
             if values.get("author_date"):
                 self.author_date.setDate(QDate.fromString(values["author_date"], "yyyy-MM-dd"))

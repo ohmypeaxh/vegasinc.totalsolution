@@ -56,15 +56,17 @@ Secret Key는 프로젝트, 설정 JSON, 로그, 생성 문서에 기록하지 �
 1. `F&DS Generator` 탭에서 URS PDF를 드래그앤드롭하고 시작·종료 요구사항 번호를 입력합니다.
 2. `선택 범위 URS 분석`을 실행하면 검색 가능한 PDF 텍스트를 우선 사용하고 필요한 페이지만 Settings의 CLOVA OCR 연결로 읽습니다.
 3. 변환된 문장을 표에서 검토·수정합니다. `F&DS Rules` 탭에서는 `URS 원문 끝 표현 → F&DS 변환 끝 표현` 규칙을 추가·수정·삭제하고 사용자 설정에 저장할 수 있습니다.
-4. `##장비명##`, `##문서번호##`, `##로고##`, `##작성일##`, `##F&DS내용##`이 들어 있는 DOCX 템플릿과 저장 폴더를 선택합니다.
-5. `F&DS 문서 생성`을 누르면 `##F&DS내용##` 위치에 `5.2.1.`부터 맑은 고딕 10pt로 순서대로 삽입됩니다.
+4. 문서번호 초기값은 `MD-FDS-##01-26`이며, `##`를 장비명 축약형(예: Pass Box `PB`, Clean Booth `CB`)으로 바꿉니다.
+5. `##장비명##`, `##문서번호##`, `##로고##`, `##작성일##`, `##F&DS내용##`이 들어 있는 DOCX 템플릿과 저장 폴더를 선택합니다.
+6. `F&DS 문서 생성`을 누르면 `##F&DS내용##` 위치에 `5.2.1.`부터 맑은 고딕 10pt로 순서대로 삽입됩니다.
 
 ## 브랜드 에셋
 
-`assets\vegas_logo.png`는 Vegas 공식 원본 로고이며, `assets\app.png`와 `assets\app.ico`는 이 로고로 만든 앱/설치 프로그램 아이콘입니다. 원본 로고가 갱신되면 Pillow를 사용할 수 있는 개발 환경에서 다음 명령으로 아이콘을 다시 만들 수 있습니다.
+`assets\vegas_logo.png`는 프로그램 내부에 표시하는 Vegas 공식 워드마크입니다. `assets\app.png`와 `assets\app.ico`는 실행파일, 설치파일, 제거 프로그램, 시작 메뉴 및 바탕화면 바로가기에 공통으로 적용하는 전용 V-DOC 아이콘입니다. 워드마크만 갱신할 때는 기존 앱 아이콘을 유지하며, 앱 아이콘도 함께 갱신할 때만 `--app-icon`을 지정합니다.
 
 ```bat
 python scripts\generate_brand_assets.py "경로\vegas_logo_new.png" --output assets
+python scripts\generate_brand_assets.py "경로\vegas_logo_new.png" --app-icon "경로\app_icon.png" --output assets
 ```
 
 ## Windows 설치 프로그램 빌드

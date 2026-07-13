@@ -51,6 +51,13 @@ from vegas_doc.ui.widgets.file_path_input import FilePathInput
 from vegas_doc.utils.date_format import QT_DOCUMENT_DATE_FORMAT
 
 
+DEFAULT_FDS_DOCUMENT_NUMBER = "MD-FDS-##01-26"
+FDS_DOCUMENT_NUMBER_HELP = (
+    "문서번호의 ##에는 기기명의 축약형을 넣으세요. "
+    "(e.g. Pass Box - PB, Clean Booth - CB)"
+)
+
+
 class FDSExtractionWorker(QObject):
     """Extract and transform only the selected URS range off the UI thread."""
 
@@ -149,7 +156,16 @@ class FDSGeneratorWidget(QWidget):
         info_group = QGroupBox("A. 문서 정보")
         info_form = QFormLayout(info_group)
         self.equipment_name = QLineEdit()
-        self.document_number = QLineEdit()
+        self.document_number = QLineEdit(DEFAULT_FDS_DOCUMENT_NUMBER)
+        document_number_field = QWidget()
+        document_number_layout = QVBoxLayout(document_number_field)
+        document_number_layout.setContentsMargins(0, 0, 0, 0)
+        document_number_layout.setSpacing(4)
+        document_number_layout.addWidget(self.document_number)
+        self.document_number_help = QLabel(FDS_DOCUMENT_NUMBER_HELP)
+        self.document_number_help.setObjectName("MutedText")
+        self.document_number_help.setWordWrap(True)
+        document_number_layout.addWidget(self.document_number_help)
         self.logo_input = FilePathInput(
             extensions=(".png", ".jpg", ".jpeg", ".bmp"),
             dialog_filter="Logo images (*.png *.jpg *.jpeg *.bmp)",
@@ -159,7 +175,7 @@ class FDSGeneratorWidget(QWidget):
         self.write_date.setCalendarPopup(True)
         self.write_date.setDisplayFormat(QT_DOCUMENT_DATE_FORMAT)
         info_form.addRow("장비명 *", self.equipment_name)
-        info_form.addRow("문서번호 *", self.document_number)
+        info_form.addRow("문서번호 *", document_number_field)
         info_form.addRow("회사 로고 *", self.logo_input)
         info_form.addRow("작성일 *", self.write_date)
         content_layout.addWidget(info_group)

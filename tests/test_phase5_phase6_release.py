@@ -67,6 +67,11 @@ def test_application_icon_contains_required_resolutions() -> None:
     assert image_type == 1
     assert {16, 32, 48, 64, 128, 256}.issubset(sizes)
 
+    png = (ROOT / "assets" / "app.png").read_bytes()
+    assert png.startswith(b"\x89PNG\r\n\x1a\n")
+    assert struct.unpack_from(">II", png, 16) == (1024, 1024)
+    assert png[25] == 6  # PNG colour type 6 is 8-bit RGBA.
+
 
 def test_resource_manager_resolves_source_branding() -> None:
     icon = ResourceManager.for_package().branding_path("app.ico")
@@ -95,6 +100,8 @@ def test_installer_and_workflow_static_release_contract() -> None:
 
     assert "DefaultDirName={autopf}\\Vegas Inc\\Vegas Total Solution Doc" in installer
     assert "SetupIconFile=..\\assets\\app.ico" in installer
+    assert "UninstallDisplayIcon={app}\\{#MyAppExeName}" in installer
+    assert installer.count("IconFilename: \"{app}\\{#MyAppExeName}\"") == 2
     assert "desktopicon" in installer and "CloseApplications=yes" in installer
     assert "[InstallDelete]" in installer
     assert 'Type: filesandordirs; Name: "{app}\\_internal"' in installer

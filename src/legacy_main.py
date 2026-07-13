@@ -408,7 +408,7 @@ class MainWindow(QMainWindow):
         info = QGroupBox("문서 정보")
         info_form = QFormLayout(info)
         self.document_number = QLineEdit()
-        self.version = QLineEdit("Rev.00")
+        self.version = QLineEdit("00")
         self.equipment = QLineEdit()
         self.author = QLineEdit(self.config.get("author", ""))
         self.position = QLineEdit(self.config.get("position", ""))

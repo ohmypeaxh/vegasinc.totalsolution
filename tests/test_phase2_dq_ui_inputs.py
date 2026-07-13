@@ -72,9 +72,13 @@ def test_real_dq_widget_contains_phase2_inputs(tmp_path: Path) -> None:
     assert widget.urs_input.acceptDrops()
     assert widget.start_requirement.text() == "6.4"
     assert widget.end_requirement.text() == "6.8"
+    assert widget.version_number.text() == "00"
     assert isinstance(widget.author_position, QLineEdit)
     widget.author_position.setText("품질보증 책임자")
     assert widget.author_position.text() == "품질보증 책임자"
     assert widget.author_date.displayFormat() == "yyyy.MM.dd"
     assert widget.page_review.minimumHeight() >= 320
     assert widget.table.minimumHeight() >= 480
+    widget.version_number.setText("03")
+    widget.reset_inputs()
+    assert widget.version_number.text() == "00"
