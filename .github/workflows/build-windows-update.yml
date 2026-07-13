@@ -1,0 +1,115 @@
+name: Build Lightweight Windows Update
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - "release/**"
+      - "codex/**"
+    paths:
+      - ".github/workflows/build-windows-update.yml"
+      - "assets/**"
+      - "installer/Vegas_Total_Solution_Doc_Update.iss"
+      - "scripts/build_update.bat"
+      - "scripts/generate_update_metadata.py"
+      - "src/**"
+      - "tests/**"
+      - "Vegas_Total_Solution_Doc.spec"
+      - "pyproject.toml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-lightweight-update:
+    name: Test and package cumulative EXE update
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install pinned project dependencies
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run complete test suite
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pytest -q
+          if ($LASTEXITCODE -ne 0) { throw "Automated tests failed." }
+
+      - name: Build current cumulative application EXE
+        env:
+          VEGAS_BUILD_NUMBER: ${{ github.run_number }}
+          VEGAS_BUILD_DATE: ${{ github.event.repository.updated_at }}
+          VEGAS_GIT_COMMIT: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          python scripts/generate_version_info.py
+          python -m PyInstaller --noconfirm --clean Vegas_Total_Solution_Doc.spec
+          if (-not (Test-Path "dist/Vegas_Total_Solution_Doc/Vegas_Total_Solution_Doc.exe")) {
+            throw "PyInstaller did not create the cumulative application EXE."
+          }
+
+      - name: Install Inno Setup 6
+        run: |
+          $ErrorActionPreference = "Stop"
+          choco install innosetup --no-progress -y
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup installation failed." }
+
+      - name: Build lightweight cumulative updater
+        env:
+          PYTHON_EXE: python
+          ISCC_PATH: C:\Program Files (x86)\Inno Setup 6\ISCC.exe
+        run: |
+          $ErrorActionPreference = "Stop"
+          cmd /c scripts\build_update.bat
+          if ($LASTEXITCODE -ne 0) { throw "Lightweight update packaging failed." }
+
+      - name: Verify update files and size
+        run: |
+          $ErrorActionPreference = "Stop"
+          $required = @(
+            "dist/update/Vegas_Total_Solution_Doc_Update.exe",
+            "dist/update/checksums.txt",
+            "dist/update/update_manifest.json",
+            "dist/update/README_UPDATE.txt"
+          )
+          $missing = $required | Where-Object { -not (Test-Path -LiteralPath $_) }
+          if ($missing) { throw "Missing update files: $($missing -join ', ')" }
+          $sizeMb = (Get-Item "dist/update/Vegas_Total_Solution_Doc_Update.exe").Length / 1MB
+          "Lightweight updater size: {0:N2} MB" -f $sizeMb
+          if ($sizeMb -gt 15) {
+            Write-Warning "::warning title=Update size above preferred target::Updater is $([math]::Round($sizeMb, 2)) MB."
+          }
+          if ($sizeMb -gt 30) { throw "Updater exceeds the 30 MB hard limit." }
+
+      - name: Upload lightweight update artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vegas-Total-Solution-Doc-Update-0.1.1
+          path: |
+            dist/update/Vegas_Total_Solution_Doc_Update.exe
+            dist/update/checksums.txt
+            dist/update/update_manifest.json
+            dist/update/README_UPDATE.txt
+          if-no-files-found: error
+          retention-days: 30

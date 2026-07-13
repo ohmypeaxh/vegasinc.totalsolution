@@ -20,7 +20,7 @@ def test_package_version_has_one_python_source() -> None:
 
     assert pyproject["project"]["dynamic"] == ["version"]
     assert pyproject["tool"]["setuptools"]["dynamic"]["version"]["attr"] == "vegas_doc.version.__version__"
-    assert BUILD_INFO.version == __version__ == "0.1.0"
+    assert BUILD_INFO.version == __version__ == "0.1.1"
 
 
 def test_windows_version_info_is_generated_from_package_version(tmp_path: Path) -> None:

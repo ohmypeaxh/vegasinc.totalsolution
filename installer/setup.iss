@@ -1,6 +1,6 @@
 
 #define MyAppName "GreenMetal Automation Suite"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.1.1"
 #define MyAppExeName "GreenMetalAutomationSuite.exe"
 
 [Setup]
