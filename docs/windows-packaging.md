@@ -21,3 +21,9 @@ The release artifact is dist/installer/Vegas_Total_Solution_Doc_Setup.exe.
 The installer uses `C:\Program Files\Vegas Inc\Vegas Total Solution Doc`, creates a Start
 Menu shortcut, optionally creates a desktop shortcut, and leaves per-user settings,
 credentials, projects, and generated documents untouched during upgrade or uninstall.
+
+Future small update packages will be cumulative: installing the latest supported update
+will include all earlier patch changes without requiring intermediate packages. The
+versioning, signing, rollback, migration, and full-installer fallback requirements are
+defined in [cumulative-updates.md](cumulative-updates.md). The updater itself is not part
+of the current release.
