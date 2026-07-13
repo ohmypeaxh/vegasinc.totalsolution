@@ -69,7 +69,8 @@ jobs:
             "08_first_run_onboarding.png",
             "09_about_dialog.png",
             "10_fds_generator.png",
-            "11_fds_rules.png"
+            "11_fds_rules.png",
+            "12_raw_data_generator.png"
           )
           $missing = $expected | Where-Object {
             -not (Test-Path -LiteralPath (Join-Path "artifacts/ui-previews" $_))

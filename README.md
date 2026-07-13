@@ -5,7 +5,7 @@ Vegas Inc.의 Windows용 사내 문서 자동화 플랫폼입니다. 현재 DQ G
 ## 주요 구성
 
 - PySide6 플러그인 기반 데스크톱 UI
-- Vegas 공식 로고와 브랜드 테마를 적용한 `Manual / DQ / F&DS / Settings` 작업 공간
+- Vegas 공식 로고와 브랜드 테마를 적용한 `Manual / DQ / F&DS / Raw Data / Settings` 작업 공간
 - 숫자 계층을 인식하는 URS 범위 추출 (`6.9 < 6.10`, 하위 항목 포함)
 - 검색 가능한 PDF 텍스트 우선 사용 및 페이지별 OCR 실패 격리
 - 작은 표 번호를 위한 고해상도 OCR 렌더링과 `7.I`, `7,10` 같은 숫자 오인식 보정
@@ -62,6 +62,14 @@ Secret Key는 프로젝트, 설정 JSON, 로그, 생성 문서에 기록하지 �
 5. `##장비명##`, `##문서번호##`, `##로고##`, `##작성일##`, `##F&DS내용##`이 들어 있는 DOCX 템플릿과 저장 폴더를 선택합니다.
 6. `F&DS 문서 생성`을 누르면 `##F&DS내용##` 위치에 `5.2.1.`부터 맑은 고딕 10pt로 순서대로 삽입됩니다.
 
+## Raw Data Generator
+
+- Raw Data Type은 `HEPA Filter`, `2 cut Picture (comment)`, `2 cut Picture (non-comment)` 중에서 선택합니다.
+- 적격성평가 종류와 문서번호는 각각 `##적격성종류##`, `##문서번호##`에 삽입됩니다. 회사 로고는 `##로고##` 위치에 높이 0.95cm, 원본 비율 유지로 삽입됩니다.
+- HEPA 형식은 `##HEPA번호##`가 포함된 표 전체를 개수만큼 복제하고 `HEPA-01`부터 순서대로 번호를 붙입니다.
+- 사진형은 `##검증명##`과 사진 삽입 위치 `##사진##`을 사용합니다. 여러 사진을 드래그앤드롭한 뒤 버튼이나 목록 드래그로 순서를 변경할 수 있습니다.
+- 모든 첨부사진은 높이 9.88cm, 원본 가로세로 비율 유지로 삽입되며 두 장마다 다음 페이지로 넘어갑니다. `comment` 형식은 확장자를 뺀 파일명을 Arial 10pt로 먼저 쓰고, `non-comment` 형식은 빈 줄만 둡니다.
+
 ## 브랜드 에셋
 
 `assets\vegas_logo.png`는 프로그램 내부에 표시하는 Vegas 공식 워드마크입니다. `assets\app.png`와 `assets\app.ico`는 실행파일, 설치파일, 제거 프로그램, 시작 메뉴 및 바탕화면 바로가기에 공통으로 적용하는 전용 V-DOC 아이콘입니다. 워드마크만 갱신할 때는 기존 앱 아이콘을 유지하며, 앱 아이콘도 함께 갱신할 때만 `--app-icon`을 지정합니다.
@@ -101,7 +109,7 @@ GitHub에서 **Actions → Generate UI Previews → Run workflow**를 실행한 
 scripts\preview_ui.bat
 ```
 
-실제 PySide6 위젯으로 만든 11개 PNG가 `artifacts\ui-previews\`에 생성됩니다. F&DS Generator와 F&DS Rules 탭을 포함하며, 샘플 데이터와 마스킹된 자격증명만 사용합니다.
+실제 PySide6 위젯으로 만든 12개 PNG가 `artifacts\ui-previews\`에 생성됩니다. F&DS Generator, F&DS Rules, Raw Data Generator 화면을 포함하며, 샘플 데이터와 마스킹된 자격증명만 사용합니다.
 
 ## 데이터 위치와 보안
 

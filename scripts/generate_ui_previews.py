@@ -11,16 +11,19 @@ os.environ.pop("VEGAS_CLOVA_INVOKE_URL", None)
 os.environ.pop("VEGAS_CLOVA_SECRET_KEY", None)
 
 from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication, QLineEdit, QScrollArea, QWidget
 
 from vegas_doc.app.main import create_main_window, get_or_create_application
 from vegas_doc.builtin_plugins.dq_generator import DQGeneratorWidget
 from vegas_doc.builtin_plugins.fds_generator import FDSGeneratorWidget
+from vegas_doc.builtin_plugins.raw_data_generator import RawDataGeneratorWidget
 from vegas_doc.builtin_plugins.settings import SettingsWidget
 from vegas_doc.core.application_context import build_application_context
 from vegas_doc.core.theme_manager import ThemeManager
 from vegas_doc.models.dq_mapping import DQResponse
 from vegas_doc.models.fds_document import FDSStatement
+from vegas_doc.models.raw_data_document import QualificationType, RawDataType
 from vegas_doc.models.urs import URSRequirement
 from vegas_doc.ui.about_dialog import AboutDialog
 from vegas_doc.ui.onboarding_wizard import OnboardingWizard
@@ -39,6 +42,7 @@ EXPECTED_SCREENSHOTS = (
     "09_about_dialog.png",
     "10_fds_generator.png",
     "11_fds_rules.png",
+    "12_raw_data_generator.png",
 )
 
 
@@ -232,6 +236,28 @@ def generate_previews() -> None:
         _save_widget(window, "10_fds_generator.png", app)
         fds_widget.tabs.setCurrentIndex(1)
         _save_widget(window, "11_fds_rules.png", app)
+
+        raw_data_widget = _select_plugin(window, "raw-data", app)
+        if not isinstance(raw_data_widget, RawDataGeneratorWidget):
+            raise TypeError("Raw Data plugin did not provide the production RawDataGeneratorWidget")
+        raw_data_widget.raw_data_type.setCurrentText(RawDataType.TWO_CUT_COMMENT.value)
+        raw_data_widget.qualification_type.setCurrentText(QualificationType.OPERATIONAL_QUALIFICATION.value)
+        raw_data_widget.document_number.setText("RD-DEMO-001")
+        raw_data_widget.verification_name.setText("Demo Air Flow Visualization")
+        raw_data_widget.logo_input.set_path(Path("sample-data") / "vegas_demo_logo.png")
+        raw_data_widget.template_input.set_path(Path("templates") / "demo_raw_data_template.docx")
+        raw_data_widget.output_directory.set_path(Path("output"))
+        sample_images: list[Path] = []
+        for index, color in enumerate(("#5f35d5", "#34206f", "#1f8c89"), start=1):
+            image_path = Path(temporary_directory) / f"sample_equipment_{index:02d}.png"
+            sample_image = QImage(640, 420, QImage.Format.Format_RGB32)
+            sample_image.fill(QColor(color))
+            if not sample_image.save(str(image_path), "PNG"):
+                raise RuntimeError(f"Could not create safe Raw Data preview image: {image_path}")
+            sample_images.append(image_path)
+        raw_data_widget.image_list.set_paths(tuple(sample_images))
+        raw_data_widget.status.setText("미리보기용 사진 3장의 순서를 검토하고 있습니다.")
+        _save_widget(window, "12_raw_data_generator.png", app)
 
         onboarding = OnboardingWizard(window)
         onboarding.template_path.setText(str(Path("templates") / "default_dq_template.docx"))
