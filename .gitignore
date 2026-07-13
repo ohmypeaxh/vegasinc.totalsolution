@@ -6,6 +6,8 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .venv/
+.build-venv/
+.tools/
 venv/
 
 # Build outputs

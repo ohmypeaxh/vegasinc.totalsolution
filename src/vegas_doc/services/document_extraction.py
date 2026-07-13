@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import fitz
@@ -32,10 +33,34 @@ class PyMuPDFDocumentTextExtractor(DocumentTextExtractor):
             return self._extract_image(source_path, policy)
         raise ValueError(f"Unsupported source type: {source_path.suffix}")
 
-    def _extract_pdf(self, source_path: Path, policy: ExtractionPolicy) -> DocumentExtractionResult:
+    def extract_range(
+        self,
+        source_path: Path,
+        document_kind: DocumentKind,
+        policy: ExtractionPolicy,
+        start_section: str,
+        end_section: str,
+    ) -> DocumentExtractionResult:
+        """Extract likely pages for a section range, preferring embedded text."""
+
+        if source_path.suffix.lower() != ".pdf":
+            return self.extract(source_path, document_kind, policy)
+        with fitz.open(source_path) as document:
+            embedded_pages = tuple(page.get_text("text").strip() for page in document)
+        page_numbers = _range_page_numbers(embedded_pages, start_section, end_section)
+        return self._extract_pdf(source_path, policy, page_numbers)
+
+    def _extract_pdf(
+        self,
+        source_path: Path,
+        policy: ExtractionPolicy,
+        page_numbers: set[int] | None = None,
+    ) -> DocumentExtractionResult:
         pages: list[PageExtractionMetadata] = []
         with fitz.open(source_path) as document:
             for index, page in enumerate(document, start=1):
+                if page_numbers is not None and index not in page_numbers:
+                    continue
                 embedded = page.get_text("text").strip()
                 if policy.prefer_embedded_text and _is_meaningful(embedded):
                     pages.append(PageExtractionMetadata(source_path, index, DocumentKind.SEARCHABLE_PDF, ExtractionMethod.EMBEDDED_TEXT, embedded, _normalize(embedded), confidence=1.0))
@@ -81,3 +106,24 @@ def _is_meaningful(text: str) -> bool:
 
 def _normalize(text: str) -> str:
     return "\n".join(line.strip() for line in text.splitlines() if line.strip())
+
+
+_SECTION_NUMBER = re.compile(r"(?m)^\s*(\d+(?:\.\d+)*)\b")
+
+
+def _range_page_numbers(texts: tuple[str, ...], start: str, end: str) -> set[int]:
+    """Locate likely pages without sending unrelated searchable pages to OCR."""
+
+    from vegas_doc.services.dq_processing import section_in_range
+
+    matched = {
+        index
+        for index, text in enumerate(texts, start=1)
+        if any(section_in_range(value, start, end) for value in _SECTION_NUMBER.findall(text))
+    }
+    if matched:
+        return set(range(min(matched), max(matched) + 1))
+    if any(_is_meaningful(text) for text in texts):
+        return {index for index, text in enumerate(texts, start=1) if _is_meaningful(text)}
+    # With no searchable index, sequential OCR is required to locate the range.
+    return set(range(1, len(texts) + 1))

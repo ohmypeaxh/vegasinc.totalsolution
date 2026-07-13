@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QHBoxLayout, QListWidget, QListWidgetItem, QMainWindow, QStackedWidget, QWidget
 
 from vegas_doc.core.application_context import ApplicationContext
+from vegas_doc.core.resource_manager import ResourceManager
 from vegas_doc.plugins.manager import PluginManager
 from vegas_doc.plugins.plugin import Plugin
 
@@ -20,6 +22,9 @@ class MainWindow(QMainWindow):
         self._navigation = QListWidget()
         self._workspace = QStackedWidget()
         self.setWindowTitle(context.settings.app_name)
+        icon_path = context.services.resolve(ResourceManager).branding_path("app.ico")
+        if icon_path is not None:
+            self.setWindowIcon(QIcon(str(icon_path)))
         self.resize(1100, 760)
         self._build_shell()
         self.load_plugins()

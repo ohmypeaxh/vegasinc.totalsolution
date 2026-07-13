@@ -3,8 +3,7 @@ name: Build Windows Installer
 on:
   workflow_dispatch:
   pull_request:
-    branches:
-      - main
+    branches: [main]
   push:
     branches:
       - main
@@ -15,9 +14,9 @@ permissions:
 
 jobs:
   build-windows-installer:
-    name: Measure, optimize, and package Windows installer
+    name: Test and package Windows release
     runs-on: windows-latest
-    timeout-minutes: 75
+    timeout-minutes: 90
     defaults:
       run:
         shell: pwsh
@@ -32,76 +31,81 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install dependencies
+      - name: Install test dependencies
         run: |
           $ErrorActionPreference = "Stop"
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
-      - name: Run tests
+      - name: Run complete test suite
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
           $ErrorActionPreference = "Stop"
           python -m pytest -q
+          if ($LASTEXITCODE -ne 0) { throw "Automated tests failed." }
 
       - name: Install Inno Setup 6
         run: |
           $ErrorActionPreference = "Stop"
           choco install innosetup --no-progress -y
-          if ($LASTEXITCODE -ne 0) { Write-Error "::error title=Inno Setup installation failed::Chocolatey installation failed." }
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup installation failed." }
 
-      - name: Build and measure baseline package
+      - name: Build optimized PyInstaller distribution
+        env:
+          QT_QPA_PLATFORM: offscreen
+          VEGAS_BUILD_NUMBER: ${{ github.run_number }}
+          VEGAS_BUILD_DATE: ${{ github.event.repository.updated_at }}
+          VEGAS_GIT_COMMIT: ${{ github.sha }}
         run: |
           $ErrorActionPreference = "Stop"
-          python -m PyInstaller --noconfirm --clean --windowed --name Vegas_Total_Solution_Doc --distpath dist/before --workpath build/before --specpath build/before --paths src --collect-all vegas_doc --collect-all PySide6 src/main.py
-          if ($LASTEXITCODE -ne 0) { Write-Error "::error title=Baseline PyInstaller failed::The pre-optimization build failed." }
-          Remove-Item -Recurse -Force dist/Vegas_Total_Solution_Doc -ErrorAction SilentlyContinue
-          Copy-Item -Recurse dist/before/Vegas_Total_Solution_Doc dist/Vegas_Total_Solution_Doc
-          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6/ISCC.exe"
-          if (-not (Test-Path $iscc)) { $iscc = Join-Path $env:ProgramFiles "Inno Setup 6/ISCC.exe" }
-          & $iscc "installer/Vegas_Total_Solution_Doc.iss"
-          if ($LASTEXITCODE -ne 0) { Write-Error "::error title=Baseline Inno Setup failed::The baseline installer failed." }
-          Move-Item -Force dist/installer/Vegas_Total_Solution_Doc_Setup.exe dist/installer/Vegas_Total_Solution_Doc_Setup_Before.exe
-          python scripts/package_size_report.py --distribution dist/before/Vegas_Total_Solution_Doc --installer dist/installer/Vegas_Total_Solution_Doc_Setup_Before.exe
+          cmd /c scripts\build_exe.bat
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller stage failed." }
 
-      - name: Build optimized one-folder package
+      - name: Build Inno Setup installer
+        env:
+          ISCC_PATH: C:\Program Files (x86)\Inno Setup 6\ISCC.exe
         run: |
           $ErrorActionPreference = "Stop"
-          .scriptsuild_exe.bat
-          if ($LASTEXITCODE -ne 0) { Write-Error "::error title=Optimized PyInstaller failed::The optimized spec build failed." }
-          .scriptsuild_installer.bat
-          if ($LASTEXITCODE -ne 0) { Write-Error "::error title=Optimized Inno Setup failed::The optimized installer failed." }
+          cmd /c scripts\build_installer.bat
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup stage failed." }
+
+      - name: Generate checksums and build manifest
+        run: |
+          $ErrorActionPreference = "Stop"
+          .\.build-venv\Scripts\python.exe scripts\generate_release_metadata.py
+          .\.build-venv\Scripts\python.exe scripts\package_size_report.py --after
+          if ($LASTEXITCODE -ne 0) { throw "Release metadata stage failed." }
+
+      - name: Enforce installer size policy
+        run: |
+          $ErrorActionPreference = "Stop"
           $installer = "dist/installer/Vegas_Total_Solution_Doc_Setup.exe"
-          $hash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  Vegas_Total_Solution_Doc_Setup.exe" | Set-Content dist/installer/checksums.txt -Encoding ascii
-          [ordered]@{ product = "Vegas Total Solution Doc"; version = "0.1.0"; artifact = "Vegas_Total_Solution_Doc_Setup.exe"; sha256 = $hash; commit = "${{ github.sha }}"; workflow_run = "${{ github.run_id }}" } | ConvertTo-Json | Set-Content dist/installer/build_manifest.json -Encoding utf8
-          python scripts/package_size_report.py --after
-
-      - name: Compare package sizes and print largest files
-        run: |
-          $ErrorActionPreference = "Stop"
-          Get-Content artifacts/package_size_before.txt
+          $sizeMb = (Get-Item -LiteralPath $installer).Length / 1MB
+          "Actual installer size: {0:N2} MB" -f $sizeMb
+          if ($sizeMb -gt 100) {
+            Write-Warning "::warning title=Preferred size exceeded::Installer is $([math]::Round($sizeMb, 2)) MB; the preferred target is 100 MB or less."
+          }
+          if ($sizeMb -gt 120) {
+            Write-Warning "::warning title=Installer size high::Installer is above 120 MB and should be reviewed."
+          }
+          if ($sizeMb -gt 160) {
+            throw "Installer is $([math]::Round($sizeMb, 2)) MB, above the 160 MB hard limit."
+          }
           Get-Content artifacts/package_size_after.txt
-          $before = [double]((Select-String "Installer MB:" artifacts/package_size_before.txt).Line -replace "[^0-9.]","")
-          $after = [double]((Select-String "Installer MB:" artifacts/package_size_after.txt).Line -replace "[^0-9.]","")
-          $reduction = $before - $after
-          $percent = if ($before -gt 0) { ($reduction / $before) * 100 } else { 0 }
-          "Installer reduction: {0:N2} MB ({1:N2} percent)" -f $reduction, $percent
-          if ($after -gt 120) { Write-Warning "::warning title=Installer exceeds preferred threshold::Installer is $after MB; preferred threshold is 120 MB." }
-          if ($after -gt 160) { Write-Error "::error title=Installer size guard failed::Installer is $after MB, above the 160 MB hard limit." }
-          Get-ChildItem -File -Recurse dist/Vegas_Total_Solution_Doc | Sort-Object Length -Descending | Select-Object -First 10 FullName,Length | Format-Table
 
       - name: Verify release files
         run: |
           $ErrorActionPreference = "Stop"
-          $required = @("dist/installer/Vegas_Total_Solution_Doc_Setup.exe", "dist/installer/checksums.txt", "dist/installer/build_manifest.json", "artifacts/package_size_before.txt", "artifacts/package_size_after.txt")
-          $missing = $required | Where-Object { -not (Test-Path $_) }
-          if ($missing) { Write-Error "::error title=Release verification failed::Missing: $($missing -join ', ')" }
-          $hash = (Get-FileHash dist/installer/Vegas_Total_Solution_Doc_Setup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  Vegas_Total_Solution_Doc_Setup.exe" | Set-Content dist/installer/checksums.txt -Encoding ascii
+          $required = @(
+            "dist/installer/Vegas_Total_Solution_Doc_Setup.exe",
+            "dist/installer/checksums.txt",
+            "dist/installer/build_manifest.json"
+          )
+          $missing = $required | Where-Object { -not (Test-Path -LiteralPath $_) }
+          if ($missing) { throw "Missing release files: $($missing -join ', ')" }
 
-      - name: Upload installer
+      - name: Upload Windows installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: Vegas-Total-Solution-Doc-Installer
@@ -115,9 +119,7 @@ jobs:
       - name: Upload package size report
         uses: actions/upload-artifact@v4
         with:
-          name: package-size-report
-          path: |
-            artifacts/package_size_before.txt
-            artifacts/package_size_after.txt
+          name: Vegas-Total-Solution-Doc-Package-Size
+          path: artifacts/package_size_after.txt
           if-no-files-found: error
           retention-days: 30

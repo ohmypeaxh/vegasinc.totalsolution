@@ -9,8 +9,7 @@ keyring support remain included. UPX is disabled because Qt DLL compression can 
 or antivirus problems; this is a deliberate reliability choice.
 
 Inno Setup uses `lzma2/ultra64`, solid compression, and a separate compression process.
-GitHub Actions builds a before report from the prior broad PyInstaller command and an after
-report from `Vegas_Total_Solution_Doc.spec`. It reports distribution size, installer size,
-and the twenty largest packaged files. The release job warns above 120 MB and fails only
-above 160 MB. Exact before/after values must come from the workflow artifacts; no estimates
-are reported.
+GitHub Actions builds the optimized spec and reports distribution size, actual installer
+size, and the twenty largest packaged files. The preferred installer target is 100 MB or
+less. The job emits an additional warning above 120 MB and fails above the 160 MB hard
+limit. Exact values must come from the Windows workflow artifact; estimates are not reported.

@@ -1,90 +1,75 @@
 # Vegas Total Solution Doc
 
-Commercial-grade internal document automation platform foundation for Vegas Inc.
+Vegas Inc.의 Windows용 사내 문서 자동화 플랫폼입니다. 현재 DQ Generator는 URS PDF 텍스트 우선 추출, 필요한 페이지의 CLOVA OCR 보완, 요구사항 검토, 프로젝트 저장, Word 템플릿 치환과 반복 표 생성을 지원합니다.
 
-> Existing GreenMetal Automation Suite business behavior is preserved in `src/legacy_main.py` for reference only. The active application entry point is now the plugin-based Vegas Total Solution Doc shell.
+## 주요 구성
 
-## Foundation delivered
+- PySide6 플러그인 기반 데스크톱 UI
+- 숫자 계층을 인식하는 URS 범위 추출 (`6.9 < 6.10`, 하위 항목 포함)
+- 검색 가능한 PDF 텍스트 우선 사용 및 페이지별 OCR 실패 격리
+- 요구사항 추가·삭제·편집·순서 변경·제외·OCR 재실행
+- 일반 문단, 표, 머리글, 바닥글 및 분할 Run의 Word Placeholder 처리
+- 0.82cm 비율 유지 로고, 맑은 고딕 10pt 반복 표와 병합 제목 행
+- Windows Credential Manager/keyring 기반 Secret Key 보관
+- PyInstaller one-folder 배포와 Inno Setup 설치 프로그램
 
-- PySide6 desktop shell with left navigation and right plugin workspace.
-- Plugin contract, loader, registry, and manager with duplicate-ID rejection, deterministic ordering, and broken-plugin isolation.
-- Placeholder plugins only for Manual Generator, DQ Generator, IQ Generator, OQ Generator, PQ Generator, URS OCR, PLC Generator, Alarm Generator, Excel Helper, and Settings.
-- Core services for safe non-secret configuration, rotating daily logging, PyInstaller-compatible resource resolution, safe theming, exception handling, application context, and type-keyed dependency injection.
-- Pytest startup and plugin-loading tests.
+## 개발 실행
 
-## Architecture
+Windows와 Python 3.12에서 다음을 실행합니다.
 
-```text
-src/vegas_doc/
-  app/              # application entry point and composition
-  core/             # infrastructure services
-  plugins/          # plugin framework
-  builtin_plugins/  # installed placeholder modules
-  services/         # future service abstractions
-  ui/               # Qt shell UI
-  resources/        # packaged resources
-  config/           # defaults and config types
-  models/           # future dataclasses/domain models
-  utils/            # utility helpers
-tests/              # automated tests
-docs/               # architecture notes
-scripts/            # automation scripts
+```bat
+scripts\setup_dev.bat
+scripts\run_dev.bat
 ```
 
-## Development
+테스트만 실행하려면:
 
-```bash
-python -m venv .venv
-.venv\\Scripts\\activate
-python -m pip install -e .[dev]
-pytest
-python -m vegas_doc.app.main
+```bat
+scripts\test.bat
 ```
 
-## Configuration and secrets
+## DQ 문서 생성
 
-Configuration is JSON and non-secret only. Missing, empty, malformed, or non-object user configuration falls back to defaults and is logged when a logger is available. Runtime files are written to a Windows-writable per-user application data directory, never to the installed application directory. Runtime logs are written under `logs/yyyy-mm-dd.log` with UTF-8 `RotatingFileHandler`. Secrets must be stored through an approved secret store in future feature work, never in config files or the repository.
+1. Settings에서 CLOVA Invoke URL, Secret Key, 요청 제한 시간을 입력하고 연결을 테스트합니다.
+2. DQ Generator에서 회사 로고, DOCX 템플릿, URS PDF와 문서 정보를 입력합니다.
+3. 시작·종료 요구사항 번호를 입력하고 `URS 분석`을 누릅니다.
+4. 낮은 신뢰도 항목과 번호, 제목, 내용을 검토하고 필요한 행을 추가·삭제·재정렬합니다.
+5. 출력 폴더와 파일명을 확인하고 `Word 문서 생성`을 누릅니다.
 
-## Phase 2 DQ domain foundation
+Secret Key는 프로젝트, 설정 JSON, 로그, 생성 문서에 기록하지 않습니다. 입력 템플릿은 직접 수정하지 않고 임시 복사본에서 처리한 뒤 결과를 원자적으로 저장합니다.
 
-Phase 2 adds provider-neutral OCR contracts, document extraction contracts, URS requirement models, DQ mapping models, and versioned JSON project persistence. It remains domain/service-only: no UI workflow, CLOVA HTTP integration, OCR/parsing/classification/mapping algorithms, or Word generation is implemented. See `docs/phase2_dq_domain.md`.
+## Windows 설치 프로그램 빌드
 
-## DQ Generator end-to-end workflow
+Python 3.12와 Inno Setup 6이 설치된 Windows에서:
 
-1. Clone the repository and checkout `feature/dq-ocr-end-to-end`.
-2. Run `scripts\setup_dev.bat` on Windows with Python 3.12.
-3. Start the app with `scripts\run_dev.bat`.
-4. Open **Settings**, enter the NAVER CLOVA Invoke URL, timeout, and secret key. The URL can also come from `VEGAS_CLOVA_INVOKE_URL`; the secret can come from `VEGAS_CLOVA_SECRET_KEY`. Secrets are stored with keyring and are never written to project files.
-5. Use **Test Connection** to send a generated readable test image.
-6. Open **DQ Generator**, enter project information, import a PDF/PNG/JPG/JPEG/TIF/TIFF URS source, run extraction, review/edit requirements and responses, save/reopen `.vdqproj`, then generate a `.docx`.
-7. If OCR fails for one page, continue reviewing successful pages and retry after fixing settings. Korean user-facing errors appear in the UI; English technical details are written to logs.
+```bat
+scripts\package_release.bat
+```
 
-Troubleshooting: verify Python 3.12, run `scripts\test.bat`, confirm keyring access, ensure the output directory is writable, and use searchable PDFs where possible to avoid unnecessary OCR.
+결과:
 
-## Not implemented in this foundation
+- `dist\Vegas_Total_Solution_Doc\Vegas_Total_Solution_Doc.exe`
+- `dist\installer\Vegas_Total_Solution_Doc_Setup.exe`
+- `dist\installer\checksums.txt`
+- `dist\installer\build_manifest.json`
+- `artifacts\package_size_after.txt`
 
-No DQ generation, OCR, Word, PDF, Excel, PLC, alarm, or document-generation business behavior is implemented here.
+GitHub Actions의 **Build Windows Installer** workflow도 같은 테스트·빌드·크기 검증을 수행하고 `Vegas-Total-Solution-Doc-Installer` artifact를 생성합니다. 설치 파일의 권장 목표는 100MB 이하이며, 120MB 초과 시 추가 경고, 160MB 초과 시 빌드를 실패시킵니다. 실제 크기는 Windows 빌드 결과만 보고하며 추정값을 사용하지 않습니다.
 
+자세한 내용은 `docs/windows-packaging.md`와 `docs/package-size-optimization.md`를 참고하세요.
 
-## UI preview screenshots
+## 실제 UI 미리보기
 
-The preview workflow renders the real PySide6 application widgets with Qt's offscreen
-platform. It uses synthetic project and URS data, masks credentials, and uploads PNG
-screenshots without calling CLOVA OCR.
+GitHub에서 **Actions → Generate UI Previews → Run workflow**를 실행한 뒤 `Vegas-Total-Solution-Doc-UI-Previews` artifact를 내려받습니다.
 
-### GitHub
-
-1. Open **Actions**.
-2. Select **Generate UI Previews**.
-3. Select **Run workflow**.
-4. Download the **Vegas-Total-Solution-Doc-UI-Previews** artifact after the run completes.
-
-### Local Windows
-
-Install the development dependencies, then run:
+로컬에서는:
 
 ```bat
 scripts\preview_ui.bat
 ```
 
-The screenshots are written to `artifacts/ui-previews/`.
+실제 PySide6 위젯으로 만든 9개 PNG가 `artifacts\ui-previews\`에 생성됩니다. 샘플 데이터와 마스킹된 자격증명만 사용합니다.
+
+## 데이터 위치와 보안
+
+설정과 로그는 설치 폴더가 아닌 Windows 사용자별 쓰기 가능한 AppData 위치에 저장됩니다. 로그는 UTF-8 `RotatingFileHandler`를 사용하고 `logs\yyyy-mm-dd.log` 형식입니다. 실제 CLOVA URL, Secret Key, 고객 URS 또는 생성된 고객 문서는 저장소와 배포 artifact에 포함하면 안 됩니다.

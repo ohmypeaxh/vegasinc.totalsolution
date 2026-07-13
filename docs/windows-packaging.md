@@ -11,10 +11,13 @@ compression can cause startup and antivirus issues.
 The installer uses Inno Setup 6 with Compression=lzma2/ultra64,
 SolidCompression=yes, and LZMAUseSeparateProcess=yes.
 
-GitHub Actions performs a broad baseline build and the optimized spec build, writes
-artifacts/package_size_before.txt and artifacts/package_size_after.txt, prints the
-installer reduction and ten largest files, warns above 120 MB, and fails above 160 MB.
-The exact measurements are uploaded in the package-size-report artifact. No package
-size is estimated or reported before that Windows run completes.
+GitHub Actions runs all tests, builds the optimized spec, compiles Inno Setup, writes
+`artifacts/package_size_after.txt`, and uploads the installer, checksums, and build manifest.
+The preferred target is 100 MB or less, with warnings above 100 MB and 120 MB and a hard
+failure above 160 MB. No package size is estimated before the Windows run completes.
 
 The release artifact is dist/installer/Vegas_Total_Solution_Doc_Setup.exe.
+
+The installer uses `C:\Program Files\Vegas Inc\Vegas Total Solution Doc`, creates a Start
+Menu shortcut, optionally creates a desktop shortcut, and leaves per-user settings,
+credentials, projects, and generated documents untouched during upgrade or uninstall.

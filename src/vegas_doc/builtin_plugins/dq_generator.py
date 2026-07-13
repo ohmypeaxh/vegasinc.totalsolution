@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QAbstractTableModel, QDate, QModelIndex, QObject, Qt, QThread, Signal
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (QComboBox, QDateEdit, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QScrollArea, QTableView, QTextEdit, QVBoxLayout, QWidget)
 
 from vegas_doc.core.application_context import ApplicationContext
@@ -33,9 +35,11 @@ class DQExtractionWorker(QObject):
     completed = Signal(tuple)
     failed = Signal(str)
 
-    def __init__(self, source_path: Path, context: ApplicationContext) -> None:
+    def __init__(self, source_path: Path, start_section: str, end_section: str, context: ApplicationContext) -> None:
         super().__init__()
         self._source_path = source_path
+        self._start_section = start_section
+        self._end_section = end_section
         self._context = context
         self._cancelled = False
 
@@ -49,12 +53,18 @@ class DQExtractionWorker(QObject):
             ocr_service = ProviderOCRService(provider)
             extractor = PyMuPDFDocumentTextExtractor(ocr_service)
             self.progress.emit(10, "문서 추출 중...")
-            extraction = extractor.extract(self._source_path, _kind_for_path(self._source_path), ExtractionPolicy())
+            extraction = extractor.extract_range(
+                self._source_path,
+                _kind_for_path(self._source_path),
+                ExtractionPolicy(),
+                self._start_section,
+                self._end_section,
+            )
             if self._cancelled:
                 self.failed.emit("작업이 취소되었습니다.")
                 return
             self.progress.emit(60, "URS 요구사항 분석 중...")
-            requirements = DefaultURSParser().parse(extraction)
+            requirements = DefaultURSParser().parse(extraction, self._start_section, self._end_section)
             classifier = KeywordRequirementClassifier()
             suggester = DQSuggestionService()
             classified = tuple(replace(classifier.classify(item), user_reviewed=True) for item in requirements)
@@ -63,13 +73,14 @@ class DQExtractionWorker(QObject):
             self.progress.emit(100, "완료")
             self.completed.emit((extraction, classified, responses, mappings))
         except Exception as error:
-            self.failed.emit(str(error))
+            self._context.services.resolve(logging.Logger).exception("DQ extraction failed")
+            self.failed.emit(f"URS 분석 중 오류가 발생했습니다: {error}")
 
 
 class RequirementTableModel(QAbstractTableModel):
     """Editable requirement review table model."""
 
-    HEADERS = ["Include", "Status", "ID", "Source", "Page", "Original", "Reviewed", "Category", "Section", "Response", "Verification", "Confidence", "Notes"]
+    HEADERS = ["선택", "상태", "URS 번호", "요구사항 제목", "페이지", "원문", "URS 내용", "분류", "DQ 섹션", "DQ 응답", "검증", "신뢰도", "메모"]
 
     def __init__(self) -> None:
         super().__init__()
@@ -83,13 +94,19 @@ class RequirementTableModel(QAbstractTableModel):
         return 0 if parent.isValid() else len(self.HEADERS)
 
     def data(self, index: QModelIndex, role: int = Qt.DisplayRole):  # type: ignore[no-untyped-def]
-        if not index.isValid() or role not in {Qt.DisplayRole, Qt.EditRole, Qt.CheckStateRole}:
+        if not index.isValid():
             return None
         req = self.requirements[index.row()]
         col = index.column()
         if col == 0 and role == Qt.CheckStateRole:
             return Qt.Checked if req.included else Qt.Unchecked
-        values = [req.included, "Reviewed" if req.user_reviewed else "Needs Review", req.requirement_id, str(req.source_document), req.source_page, req.original_text, req.normalized_text, req.category or "", req.dq_section or "", self.responses.get(req.requirement_id).text if self.responses.get(req.requirement_id) else "", req.verification_method.value, req.confidence or "", req.user_notes or ""]
+        if role == Qt.BackgroundRole and req.confidence is not None and req.confidence < 0.7:
+            return QBrush(QColor("#fff0cc"))
+        if role == Qt.ToolTipRole and req.confidence is not None and req.confidence < 0.7:
+            return "OCR 신뢰도가 낮습니다. 원문과 비교해 확인해 주세요."
+        if role not in {Qt.DisplayRole, Qt.EditRole}:
+            return None
+        values = [req.included, "검토 완료" if req.user_reviewed else "확인 필요", req.requirement_id, req.source_section or "", req.source_page, req.original_text, req.normalized_text, req.category or "", req.dq_section or "", self.responses.get(req.requirement_id).text if self.responses.get(req.requirement_id) else "", req.verification_method.value, "" if req.confidence is None else f"{req.confidence:.0%}", req.user_notes or ""]
         return values[col]
 
     def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.DisplayRole):  # type: ignore[no-untyped-def]
@@ -101,7 +118,7 @@ class RequirementTableModel(QAbstractTableModel):
         flags = super().flags(index)
         if index.column() == 0:
             return flags | Qt.ItemIsUserCheckable | Qt.ItemIsEditable
-        if index.column() in {6, 7, 8, 9, 12}:
+        if index.column() in {2, 3, 6, 7, 8, 9, 12}:
             return flags | Qt.ItemIsEditable
         return flags
 
@@ -112,6 +129,16 @@ class RequirementTableModel(QAbstractTableModel):
         col = index.column()
         if col == 0 and role == Qt.CheckStateRole:
             self.requirements[index.row()] = replace(req, included=value == Qt.Checked, user_reviewed=True)
+        elif role == Qt.EditRole and col == 2:
+            new_id = str(value).strip()
+            if not new_id or any(item.requirement_id == new_id for row, item in enumerate(self.requirements) if row != index.row()):
+                return False
+            response = self.responses.pop(req.requirement_id, None)
+            self.requirements[index.row()] = replace(req, requirement_id=new_id, user_reviewed=True)
+            if response is not None:
+                self.responses[new_id] = replace(response, response_id=f"RESP-{new_id}")
+        elif role == Qt.EditRole and col == 3:
+            self.requirements[index.row()] = replace(req, source_section=str(value).strip(), user_reviewed=True)
         elif role == Qt.EditRole and col == 6:
             self.requirements[index.row()] = replace(req, normalized_text=str(value), user_reviewed=True)
         elif role == Qt.EditRole and col == 7:
@@ -132,6 +159,40 @@ class RequirementTableModel(QAbstractTableModel):
         self.requirements = list(requirements)
         self.responses = dict(responses)
         self.endResetModel()
+
+    def add_item(self, source_document: Path, after_row: int | None = None) -> int:
+        """Add an editable review row and return its index."""
+
+        row = len(self.requirements) if after_row is None else min(after_row + 1, len(self.requirements))
+        number = 1
+        while any(item.requirement_id == f"URS-NEW-{number:03d}" for item in self.requirements):
+            number += 1
+        requirement = URSRequirement(
+            f"URS-NEW-{number:03d}", source_document, 1, "새 요구사항", "새 요구사항", "새 요구사항", confidence=None
+        )
+        self.beginInsertRows(QModelIndex(), row, row)
+        self.requirements.insert(row, requirement)
+        self.endInsertRows()
+        return row
+
+    def remove_item(self, row: int) -> bool:
+        if not 0 <= row < len(self.requirements):
+            return False
+        self.beginRemoveRows(QModelIndex(), row, row)
+        requirement = self.requirements.pop(row)
+        self.responses.pop(requirement.requirement_id, None)
+        self.endRemoveRows()
+        return True
+
+    def move_item(self, row: int, offset: int) -> int:
+        target = row + offset
+        if not 0 <= row < len(self.requirements) or not 0 <= target < len(self.requirements):
+            return row
+        self.beginResetModel()
+        item = self.requirements.pop(row)
+        self.requirements.insert(target, item)
+        self.endResetModel()
+        return target
 
 
 class DQGeneratorWidget(QWidget):
@@ -229,9 +290,22 @@ class DQGeneratorWidget(QWidget):
         self.model = RequirementTableModel()
         self.table = QTableView()
         self.table.setModel(self.model)
-        self.table.setSortingEnabled(True)
+        self.table.setSortingEnabled(False)
         review_layout.addWidget(self.page_review)
         review_layout.addWidget(self.table)
+        review_actions = QHBoxLayout()
+        for text, slot in (
+            ("행 추가", self.add_review_row),
+            ("행 삭제", self.delete_review_row),
+            ("위로", lambda: self.move_review_row(-1)),
+            ("아래로", lambda: self.move_review_row(1)),
+            ("OCR 다시 실행", self.retry_ocr),
+        ):
+            button = QPushButton(text)
+            button.clicked.connect(slot)
+            review_actions.addWidget(button)
+        review_actions.addStretch()
+        review_layout.addLayout(review_actions)
         content_layout.addWidget(review_group)
 
         output_group = QGroupBox("E. 출력 설정")
@@ -308,6 +382,9 @@ class DQGeneratorWidget(QWidget):
         self._dirty = bool(self.source_path.text().strip())
 
     def start_extraction(self) -> None:
+        if self._thread is not None and self._thread.isRunning():
+            QMessageBox.information(self, "작업 진행 중", "이미 URS 분석 작업이 진행 중입니다.")
+            return
         data = self.current_document_data()
         range_errors = [error for error in data.validation_errors(require_existing_files=False) if "요구사항 번호" in error]
         source = data.urs_pdf_path
@@ -317,17 +394,43 @@ class DQGeneratorWidget(QWidget):
             QMessageBox.warning(self, "입력 확인", "\n".join(dict.fromkeys(range_errors)))
             return
         self._thread = QThread()
-        self._worker = DQExtractionWorker(source, self._context)
+        self._worker = DQExtractionWorker(source, data.start_requirement, data.end_requirement, self._context)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.progress.connect(self._on_progress)
         self._worker.completed.connect(self._on_extracted)
         self._worker.failed.connect(self._on_failed)
+        self._worker.completed.connect(self._worker.deleteLater)
+        self._worker.failed.connect(self._worker.deleteLater)
         self._thread.start()
 
     def cancel(self) -> None:
         if self._worker:
             self._worker.cancel()
+
+    def retry_ocr(self) -> None:
+        """Re-run extraction after settings or review corrections change."""
+
+        self.start_extraction()
+
+    def add_review_row(self) -> None:
+        current = self.table.currentIndex().row()
+        source = Path(self.source_path.text().strip() or "manual-entry.pdf")
+        row = self.model.add_item(source, current if current >= 0 else None)
+        self.table.selectRow(row)
+        self._dirty = True
+
+    def delete_review_row(self) -> None:
+        row = self.table.currentIndex().row()
+        if self.model.remove_item(row):
+            self._dirty = True
+
+    def move_review_row(self, offset: int) -> None:
+        row = self.table.currentIndex().row()
+        target = self.model.move_item(row, offset)
+        if target != row:
+            self.table.selectRow(target)
+            self._dirty = True
 
     def _on_progress(self, value: int, message: str) -> None:
         self.progress.setValue(value)
@@ -339,18 +442,24 @@ class DQGeneratorWidget(QWidget):
         if self._extraction and self._extraction.pages:
             self.page_review.setPlainText(self._extraction.pages[0].reviewed_text or self._extraction.pages[0].normalized_text or self._extraction.pages[0].original_text)
         self.progress.setValue(100)
-        self.status.setText("추출 및 분석이 완료되었습니다.")
+        if requirements:
+            self.status.setText(f"추출 및 분석이 완료되었습니다. ({len(requirements)}개)")
+        else:
+            self.status.setText("입력한 범위에서 요구사항을 찾지 못했습니다.")
+            QMessageBox.warning(self, "분석 결과", "입력한 범위에서 요구사항을 찾지 못했습니다. 범위와 원문을 확인해 주세요.")
         self._dirty = True
         self._stop_thread()
 
     def _on_failed(self, message: str) -> None:
         self.status.setText(f"오류: {message}")
+        QMessageBox.warning(self, "URS 분석 오류", message)
         self._stop_thread()
 
     def _stop_thread(self) -> None:
         if self._thread:
             self._thread.quit()
             self._thread.wait(1000)
+            self._thread.deleteLater()
         self._thread = None
         self._worker = None
 
@@ -372,7 +481,7 @@ class DQGeneratorWidget(QWidget):
                 "end_requirement": self.end_requirement.text().strip(),
                 "output_filename": self.output_filename.text().strip(),
             },
-            mappings=tuple(self._mappings),
+            mappings=build_mappings(tuple(self.model.requirements), self.model.responses),
             template_settings=TemplateSettings(Path(self.template_path.text()), Path(self.output_directory_input.path())),
         )
 
@@ -418,8 +527,16 @@ class DQGeneratorWidget(QWidget):
         output = data.output_path()
         errors = data.validation_errors()
         errors.extend(DQProjectValidator().validate_for_generation(data.equipment_name, requirements, mappings, data.template_path, output))
+        if data.template_path.is_file():
+            missing = self._generator.missing_placeholders(data.template_path)
+            if missing:
+                errors.append("필수 Placeholder를 찾을 수 없습니다: " + ", ".join(missing))
         if errors:
             QMessageBox.warning(self, "생성 전 확인", "\n".join(dict.fromkeys(errors)))
+            return
+        output = self._resolve_output_conflict(output)
+        if output is None:
+            self.status.setText("문서 생성을 취소했습니다.")
             return
         context = {
             "project_name": data.equipment_name,
@@ -433,10 +550,45 @@ class DQGeneratorWidget(QWidget):
         }
         self.progress.setValue(80)
         self.status.setText("Word 문서 생성 중...")
-        self._generator.generate(data.template_path, output, context, requirements, mappings)
+        try:
+            self._generator.generate(
+                data.template_path,
+                output,
+                context,
+                requirements,
+                mappings,
+                logo_path=data.logo_path,
+                validate_required=True,
+            )
+        except Exception as error:
+            self._context.services.resolve(logging.Logger).exception("DQ Word generation failed")
+            QMessageBox.critical(self, "문서 생성 오류", str(error))
+            self.status.setText("Word 문서 생성에 실패했습니다.")
+            return
         self.progress.setValue(100)
         self.status.setText(f"DQ 문서를 생성했습니다: {output}")
         self._dirty = False
+
+    def _resolve_output_conflict(self, output: Path) -> Path | None:
+        if not output.exists():
+            return output
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("같은 이름의 파일")
+        dialog.setText(f"이미 파일이 존재합니다:\n{output}")
+        overwrite = dialog.addButton("덮어쓰기", QMessageBox.ButtonRole.AcceptRole)
+        save_as = dialog.addButton("다른 이름으로 저장", QMessageBox.ButtonRole.ActionRole)
+        cancel = dialog.addButton("취소", QMessageBox.ButtonRole.RejectRole)
+        dialog.exec()
+        if dialog.clickedButton() is overwrite:
+            return output
+        if dialog.clickedButton() is save_as:
+            selected, _ = QFileDialog.getSaveFileName(self, "다른 이름으로 저장", str(output), "Word document (*.docx)")
+            if selected:
+                path = Path(selected)
+                return path if path.suffix.lower() == ".docx" else path.with_suffix(".docx")
+        if dialog.clickedButton() is cancel:
+            return None
+        return None
 
     def closeEvent(self, event):  # type: ignore[no-untyped-def]
         if self._dirty:

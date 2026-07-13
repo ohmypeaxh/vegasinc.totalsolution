@@ -12,6 +12,10 @@ datas = collect_data_files(
         "resources/docs/*.txt",
     ],
 )
+datas += [
+    ("assets/app.ico", "vegas_doc/resources/branding"),
+    ("assets/app.png", "vegas_doc/resources/branding"),
+]
 excludes = [
     "pytest", "pytest_qt", "pip", "setuptools", "wheel", "distutils",
     "tkinter", "matplotlib", "numpy", "pandas", "scipy", "IPython",
@@ -42,5 +46,17 @@ a = Analysis(
     noarchive=False,
 )
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="Vegas_Total_Solution_Doc", debug=False, strip=False, upx=False, console=False)
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name="Vegas_Total_Solution_Doc",
+    debug=False,
+    strip=False,
+    upx=False,
+    console=False,
+    icon="assets/app.ico",
+    version="build/version_info.txt",
+)
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="Vegas_Total_Solution_Doc")
