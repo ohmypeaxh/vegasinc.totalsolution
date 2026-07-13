@@ -32,6 +32,14 @@ def test_fds_sentence_rules_cover_requested_korean_endings() -> None:
     assert transformer.transform("시스템은 기록을 저장해야 한다.") == "시스템은 기록을 저장하도록 제작한다."
 
 
+def test_fds_sentence_noun_ending_uses_natural_instrumental_particle() -> None:
+    transformer = FDSSentenceTransformer()
+
+    assert transformer.transform("소음: 60dBA.") == "소음: 60dBA로 제작한다."
+    assert transformer.transform("형상: 원형.") == "형상: 원형으로 제작한다."
+    assert transformer.transform("재질: 스틸.") == "재질: 스틸로 제작한다."
+
+
 def test_custom_fds_rule_overrides_default_behavior() -> None:
     rules = (FDSTransformationRule("적용해야 한다", "적용 가능한 구조로 제작한다."),)
 
@@ -133,10 +141,13 @@ def test_passbox_range_recovers_all_41_rows_with_ocr_number_confusions(tmp_path:
     confused_numbers = {
         "7.1": "7.I",
         "7.8": "7,B",
+        "7.9": "79",
         "7.10": "7,1O",
         "7.15": "7.I5",
-        "7.22": "7.ZZ",
+        "7.22": "722",
         "7.30": "7.3O",
+        "7.31": "731",
+        "7.34": "734",
         "7.37": "7.3T",
     }
     lines = ["7. 설계 요구사항"]
@@ -145,8 +156,8 @@ def test_passbox_range_recovers_all_41_rows_with_ocr_number_confusions(tmp_path:
         recognized = confused_numbers.get(number, number)
         content = "1대" if index == 2 else f"설계 요구사항 {index}을 적용해야 한다."
         lines.append(f"{recognized} {content}")
-    lines.append("8. 기능 요구사항")
-    lines.extend(f"8.{index} 기능 요구사항 {index}을 적용해야 한다." for index in range(1, 5))
+    lines.append("B. 기능 요구사항")
+    lines.extend(f"B.{index} 기능 요구사항 {index}을 적용해야 한다." for index in range(1, 5))
     page = PageExtractionMetadata(
         source,
         9,

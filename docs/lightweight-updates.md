@@ -20,4 +20,4 @@
 
 ## GitHub Actions
 
-**Actions → Build Lightweight Windows Update**에서 실행 결과를 열고 `Vegas-Total-Solution-Doc-Update-0.1.1` artifact를 내려받습니다.
+**Actions → Build Lightweight Windows Update**에서 실행 결과를 열고 `Vegas-Total-Solution-Doc-Update-0.1.2` artifact를 내려받습니다.

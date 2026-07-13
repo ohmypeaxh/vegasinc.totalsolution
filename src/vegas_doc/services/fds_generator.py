@@ -123,8 +123,22 @@ class FDSSentenceTransformer:
             return sentence
         if sentence.endswith("제작한다"):
             return f"{sentence}."
-        stem = sentence[:-1] if sentence.endswith("다") else sentence
-        return f"{stem}도록 제작한다."
+        if sentence.endswith("다"):
+            return f"{sentence[:-1]}도록 제작한다."
+        particle = _instrumental_particle(sentence)
+        return f"{sentence}{particle} 제작한다."
+
+
+def _instrumental_particle(text: str) -> str:
+    """Return the natural Korean instrumental particle for a noun ending."""
+
+    if text.endswith(("으로", "로")):
+        return ""
+    final_character = text[-1]
+    if "가" <= final_character <= "힣":
+        jongseong = (ord(final_character) - ord("가")) % 28
+        return "로" if jongseong in {0, 8} else "으로"
+    return "로"
 
 
 class FDSURSParser:

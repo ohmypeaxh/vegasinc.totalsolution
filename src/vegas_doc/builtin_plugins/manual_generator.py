@@ -9,6 +9,7 @@ from pathlib import Path
 from PySide6.QtCore import QDate, QUrl
 from PySide6.QtGui import QDesktopServices, QIntValidator
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDateEdit,
@@ -140,12 +141,12 @@ class ManualGeneratorWidget(QWidget):
         actions = QHBoxLayout()
         reset = QPushButton("입력값 초기화")
         reset.clicked.connect(self.reset_inputs)
-        generate = QPushButton("Word 매뉴얼 생성")
-        generate.setObjectName("PrimaryAction")
-        generate.clicked.connect(self.generate_manual)
+        self.generate_button = QPushButton("Word 매뉴얼 생성")
+        self.generate_button.setObjectName("PrimaryAction")
+        self.generate_button.clicked.connect(self.generate_manual)
         actions.addStretch()
         actions.addWidget(reset)
-        actions.addWidget(generate)
+        actions.addWidget(self.generate_button)
         content_layout.addLayout(actions)
         self.status = QLabel("템플릿 자리표시자: [##장비명##], [##문서번호##], [##작성일##], [##제품선택##], [##사진1##]~[##사진4##], [##알람리스트##]")
         self.status.setObjectName("MutedText")
@@ -189,7 +190,10 @@ class ManualGeneratorWidget(QWidget):
         if errors:
             QMessageBox.warning(self, "입력 확인", "\n".join(dict.fromkeys(errors)))
             return
-        self.status.setText("Word 매뉴얼을 생성하고 있습니다...")
+        self.generate_button.setEnabled(False)
+        self.generate_button.setText("Word 생성 중...")
+        self.status.setText("Word 생성 중...")
+        QApplication.processEvents()
         try:
             output_path = self._generator.generate(request)
         except Exception as error:  # noqa: BLE001 - UI boundary reports service errors.
@@ -197,6 +201,9 @@ class ManualGeneratorWidget(QWidget):
             self.status.setText("Word 매뉴얼 생성에 실패했습니다.")
             QMessageBox.critical(self, "문서 생성 오류", str(error))
             return
+        finally:
+            self.generate_button.setEnabled(True)
+            self.generate_button.setText("Word 매뉴얼 생성")
         self.status.setText(f"Word 매뉴얼을 생성했습니다: {output_path}")
         answer = QMessageBox.question(self, "생성 완료", f"Word 생성 완료!\n\n{output_path}\n\n파일을 바로 열까요?")
         if answer == QMessageBox.Yes:

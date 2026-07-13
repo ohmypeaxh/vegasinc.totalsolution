@@ -99,10 +99,8 @@ def _repeat_hepa_table(document: DocumentObject, count: int) -> None:
     _replace_text_in_table(table, {HEPA_NUMBER_TOKEN: "HEPA-01"})
     current_xml = table._tbl  # noqa: SLF001
     for index in range(2, count + 1):
-        spacer = OxmlElement("w:p")
-        current_xml.addnext(spacer)
         cloned_xml = copy.deepcopy(pristine_xml)
-        spacer.addnext(cloned_xml)
+        current_xml.addnext(cloned_xml)
         cloned_table = Table(cloned_xml, table._parent)  # noqa: SLF001
         _replace_text_in_table(cloned_table, {HEPA_NUMBER_TOKEN: f"HEPA-{index:02d}"})
         current_xml = cloned_xml

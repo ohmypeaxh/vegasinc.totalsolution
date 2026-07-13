@@ -11,6 +11,7 @@ from PySide6.QtCore import QDate, QObject, Qt, QThread, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QDateEdit,
     QFormLayout,
     QGroupBox,
@@ -228,11 +229,11 @@ class FDSGeneratorWidget(QWidget):
         content_layout.addWidget(output_group)
 
         actions = QHBoxLayout()
-        generate = QPushButton("F&DS 문서 생성")
-        generate.setObjectName("PrimaryAction")
-        generate.clicked.connect(self.generate_fds)
+        self.generate_button = QPushButton("F&DS 문서 생성")
+        self.generate_button.setObjectName("PrimaryAction")
+        self.generate_button.clicked.connect(self.generate_fds)
         actions.addStretch()
-        actions.addWidget(generate)
+        actions.addWidget(self.generate_button)
         content_layout.addLayout(actions)
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
@@ -477,7 +478,10 @@ class FDSGeneratorWidget(QWidget):
         if not confirm_ocr_document_review(self):
             self.status.setText("문서 검토 경고에서 생성을 취소했습니다.")
             return
-        self.status.setText("F&DS Word 문서를 생성하고 있습니다...")
+        self.generate_button.setEnabled(False)
+        self.generate_button.setText("Word 생성 중...")
+        self.status.setText("Word 생성 중...")
+        QApplication.processEvents()
         try:
             output_path = self._generator.generate(request)
         except Exception as error:  # noqa: BLE001 - UI boundary reports service errors.
@@ -485,6 +489,9 @@ class FDSGeneratorWidget(QWidget):
             self.status.setText("F&DS 문서 생성에 실패했습니다.")
             QMessageBox.critical(self, "문서 생성 오류", str(error))
             return
+        finally:
+            self.generate_button.setEnabled(True)
+            self.generate_button.setText("F&DS 문서 생성")
         self.status.setText(f"F&DS 문서를 생성했습니다: {output_path}")
         answer = QMessageBox.question(self, "생성 완료", f"F&DS Word 생성 완료!\n\n{output_path}\n\n파일을 바로 열까요?")
         if answer == QMessageBox.Yes:

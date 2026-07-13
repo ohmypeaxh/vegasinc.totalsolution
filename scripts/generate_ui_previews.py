@@ -268,7 +268,7 @@ def generate_previews() -> None:
         _save_widget(onboarding, "08_first_run_onboarding.png", app)
         onboarding.close()
 
-        about = AboutDialog("0.1.1", window)
+        about = AboutDialog("0.1.2", window)
         about.resize(640, 360)
         about.show()
         _save_widget(about, "09_about_dialog.png", app)

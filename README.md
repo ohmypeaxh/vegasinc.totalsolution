@@ -103,7 +103,7 @@ GitHub Actions의 **Build Windows Installer** workflow도 같은 테스트·빌�
 
 전체 설치를 한 번 완료한 PC에서는 이후 `Vegas_Total_Solution_Doc_Update.exe`만 실행해 최신 메인 EXE와 리소스를 교체할 수 있습니다. 업데이트 패키지는 누적형이므로 최신 버전 하나만 설치하면 이전 소형 업데이트의 프로그램 코드 변경도 함께 적용됩니다.
 
-GitHub에서 **Actions → Build Lightweight Windows Update** 실행 결과를 열고 `Vegas-Total-Solution-Doc-Update-0.1.1` artifact를 내려받습니다. 기본 설치본이 없거나 Python·PySide6 같은 런타임 의존성이 바뀐 버전에는 전체 설치파일을 사용해야 합니다.
+GitHub에서 **Actions → Build Lightweight Windows Update** 실행 결과를 열고 `Vegas-Total-Solution-Doc-Update-0.1.2` artifact를 내려받습니다. 기본 설치본이 없거나 Python·PySide6 같은 런타임 의존성이 바뀐 버전에는 전체 설치파일을 사용해야 합니다.
 
 로컬 빌드:
 

@@ -63,6 +63,9 @@ def test_hepa_generator_duplicates_complete_template_table(tmp_path: Path) -> No
     assert "Document: RD-HEPA-001" in text
     assert len(rendered.tables) == 3
     assert [table.cell(0, 0).text for table in rendered.tables] == ["HEPA-01", "HEPA-02", "HEPA-03"]
+    body_children = list(rendered._element.body)  # noqa: SLF001
+    table_positions = [index for index, element in enumerate(body_children) if element.tag.endswith("}tbl")]
+    assert table_positions == list(range(table_positions[0], table_positions[0] + 3))
     assert all(table.cell(1, 0).text == "Frame" and table.cell(1, 1).text == "Filter" for table in rendered.tables)
     assert all("FRAME PHOTO" in table.cell(2, 0).text for table in rendered.tables)
     assert len(rendered.inline_shapes) == 1
@@ -176,3 +179,40 @@ def test_raw_data_widget_switches_mode_specific_inputs_and_reorders_images(tmp_p
     assert "9.88cm" in widget.picture_help.text()
     assert widget.logo_input.acceptDrops()
     assert widget.template_input.acceptDrops()
+
+
+def test_raw_data_widget_shows_word_generation_progress(tmp_path: Path, qapp, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from PySide6.QtWidgets import QMessageBox
+
+    from vegas_doc.builtin_plugins.raw_data_generator import RawDataGeneratorWidget
+    from vegas_doc.config.defaults import AppSettings
+    from vegas_doc.core.application_context import build_application_context
+
+    template = tmp_path / "template.docx"
+    Document().save(template)
+    logo = _write_image(tmp_path / "logo.png")
+    widget = RawDataGeneratorWidget(build_application_context(AppSettings(), data_dir=tmp_path / "data"))
+    widget.document_number.setText("RD-HEPA-001")
+    widget.template_input.set_path(template)
+    widget.logo_input.set_path(logo)
+    widget.output_directory.set_path(tmp_path)
+    observed: dict[str, object] = {}
+
+    def generate(_request: RawDataDocumentRequest) -> Path:
+        observed["status"] = widget.status.text()
+        observed["button_text"] = widget.generate_button.text()
+        observed["button_enabled"] = widget.generate_button.isEnabled()
+        return tmp_path / "generated.docx"
+
+    monkeypatch.setattr(widget._generator, "generate", generate)
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.No)
+
+    widget.generate_document()
+
+    assert observed == {
+        "status": "Word 생성 중...",
+        "button_text": "Word 생성 중...",
+        "button_enabled": False,
+    }
+    assert widget.generate_button.isEnabled()
+    assert widget.generate_button.text() == "Raw Data Word 생성"

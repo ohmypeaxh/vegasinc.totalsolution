@@ -106,7 +106,7 @@ jobs:
       - name: Upload lightweight update artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Vegas-Total-Solution-Doc-Update-0.1.1
+          name: Vegas-Total-Solution-Doc-Update-0.1.2
           path: |
             dist/update/Vegas_Total_Solution_Doc_Update.exe
             dist/update/checksums.txt

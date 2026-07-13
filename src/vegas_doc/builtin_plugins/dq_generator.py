@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QAbstractTableModel, QDate, QModelIndex, QObject, Qt, QThread, Signal
 from PySide6.QtGui import QBrush, QColor
-from PySide6.QtWidgets import (QDateEdit, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QScrollArea, QTableView, QTextEdit, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QDateEdit, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QScrollArea, QTableView, QTextEdit, QVBoxLayout, QWidget)
 
 from vegas_doc.core.application_context import ApplicationContext
 from vegas_doc.core.config_manager import ConfigManager
@@ -356,10 +356,10 @@ class DQGeneratorWidget(QWidget):
             button = QPushButton(text)
             button.clicked.connect(slot)
             action_row.addWidget(button)
-        generate = QPushButton("Word 문서 생성")
-        generate.setObjectName("PrimaryAction")
-        generate.clicked.connect(self.generate_docx)
-        action_row.addWidget(generate)
+        self.generate_button = QPushButton("Word 문서 생성")
+        self.generate_button.setObjectName("PrimaryAction")
+        self.generate_button.clicked.connect(self.generate_docx)
+        action_row.addWidget(self.generate_button)
         content_layout.addLayout(action_row)
 
         self.progress = QProgressBar()
@@ -587,7 +587,10 @@ class DQGeneratorWidget(QWidget):
             "vendor_name": data.vendor_name,
         }
         self.progress.setValue(80)
+        self.generate_button.setEnabled(False)
+        self.generate_button.setText("Word 생성 중...")
         self.status.setText("Word 문서 생성 중...")
+        QApplication.processEvents()
         try:
             self._generator.generate(
                 data.template_path,
@@ -603,6 +606,9 @@ class DQGeneratorWidget(QWidget):
             QMessageBox.critical(self, "문서 생성 오류", str(error))
             self.status.setText("Word 문서 생성에 실패했습니다.")
             return
+        finally:
+            self.generate_button.setEnabled(True)
+            self.generate_button.setText("Word 문서 생성")
         self.progress.setValue(100)
         self.status.setText(f"DQ 문서를 생성했습니다: {output}")
         self._dirty = False

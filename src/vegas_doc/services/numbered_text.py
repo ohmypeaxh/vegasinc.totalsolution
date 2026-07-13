@@ -17,7 +17,7 @@ class NumberedTextBlock:
 
 
 _OCR_DIGIT_RUN = r"[0-9OoIl|ZzSsBbTt]+"
-_HIERARCHICAL_NUMBER = rf"\d+(?:\s*[.,:·]\s*{_OCR_DIGIT_RUN})*"
+_HIERARCHICAL_NUMBER = rf"{_OCR_DIGIT_RUN}(?:\s*[.,:·]\s*{_OCR_DIGIT_RUN})*"
 _NUMBER_ONLY = re.compile(rf"^\s*(?P<number>{_HIERARCHICAL_NUMBER})\s*(?:[.)])?\s*$")
 _NUMBER_WITH_TEXT = re.compile(
     rf"^\s*(?P<number>{_HIERARCHICAL_NUMBER})\s*(?P<suffix>[.)]?)(?:\s+|\s*[|:\-]\s*)(?P<text>\S.*)$"
@@ -63,6 +63,7 @@ def numbered_text_blocks(text: str, start: str, end: str) -> tuple[NumberedTextB
         parsed = _parse_numbered_line(line)
         if parsed is not None:
             number, content, range_boundary = parsed
+            number = _restore_missing_separator(number, start_key, end_key)
             if in_range(number):
                 flush()
                 current_number = number
@@ -114,6 +115,18 @@ def _normalize_number(value: str) -> str:
         }
     )
     return re.sub(r"\s+", "", value).translate(translation)
+
+
+def _restore_missing_separator(number: str, start_key: tuple[int, ...], end_key: tuple[int, ...]) -> str:
+    """Recover section numbers such as ``731`` when OCR drops the dot in ``7.31``."""
+
+    if "." in number or not number.isdigit() or len(start_key) != 1 or len(end_key) != 1:
+        return number
+    for root in range(start_key[0], end_key[0] + 1):
+        prefix = str(root)
+        if number.startswith(prefix) and len(number) > len(prefix):
+            return f"{prefix}.{number[len(prefix):]}"
+    return number
 
 
 def _is_noise(line: str) -> bool:

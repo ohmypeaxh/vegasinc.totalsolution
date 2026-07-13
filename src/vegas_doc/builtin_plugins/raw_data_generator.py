@@ -8,6 +8,7 @@ from pathlib import Path
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QFormLayout,
     QGroupBox,
@@ -125,10 +126,10 @@ class RawDataGeneratorWidget(QWidget):
         files_form.addRow("", placeholder_help)
         content_layout.addWidget(files_group)
 
-        generate = QPushButton("Raw Data Word 생성")
-        generate.setObjectName("PrimaryButton")
-        generate.clicked.connect(self.generate_document)
-        content_layout.addWidget(generate)
+        self.generate_button = QPushButton("Raw Data Word 생성")
+        self.generate_button.setObjectName("PrimaryButton")
+        self.generate_button.clicked.connect(self.generate_document)
+        content_layout.addWidget(self.generate_button)
         self.status = QLabel("필수 항목과 Word 템플릿을 선택해 주세요.")
         self.status.setObjectName("StatusText")
         self.status.setWordWrap(True)
@@ -187,7 +188,10 @@ class RawDataGeneratorWidget(QWidget):
         if errors:
             QMessageBox.warning(self, "생성 전 확인", "\n".join(dict.fromkeys(errors)))
             return
-        self.status.setText("Raw Data Word 문서를 생성하고 있습니다...")
+        self.generate_button.setEnabled(False)
+        self.generate_button.setText("Word 생성 중...")
+        self.status.setText("Word 생성 중...")
+        QApplication.processEvents()
         try:
             output_path = self._generator.generate(request)
         except Exception as error:  # noqa: BLE001 - UI boundary reports service errors.
@@ -195,6 +199,9 @@ class RawDataGeneratorWidget(QWidget):
             self.status.setText("Raw Data 문서 생성에 실패했습니다.")
             QMessageBox.critical(self, "문서 생성 오류", str(error))
             return
+        finally:
+            self.generate_button.setEnabled(True)
+            self.generate_button.setText("Raw Data Word 생성")
         self.status.setText(f"Raw Data 문서를 생성했습니다: {output_path}")
         answer = QMessageBox.question(
             self,

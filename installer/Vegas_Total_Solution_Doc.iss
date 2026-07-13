@@ -1,6 +1,6 @@
 #define MyAppName "Vegas Total Solution Doc"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.1"
+  #define MyAppVersion "0.1.2"
 #endif
 #define MyAppPublisher "Vegas Inc."
 #define MyAppExeName "Vegas_Total_Solution_Doc.exe"
