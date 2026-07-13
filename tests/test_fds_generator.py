@@ -41,6 +41,31 @@ def test_custom_fds_rule_overrides_default_behavior() -> None:
     )
 
 
+def test_fds_rule_transforms_ending_before_trailing_parenthetical() -> None:
+    transformer = FDSSentenceTransformer((FDSTransformationRule("해야 한다", "하도록 제작한다."),))
+
+    assert transformer.transform("6.4.1 센서를 설치해야 한다. (작업자 안전 고려)") == (
+        "센서를 설치하도록 제작한다. (작업자 안전 고려)"
+    )
+    assert transformer.transform("센서를 설치해야 한다(필요 시)") == "센서를 설치하도록 제작한다. (필요 시)"
+
+
+def test_fds_rule_transforms_every_sentence_boundary_without_reprocessing_targets() -> None:
+    transformer = FDSSentenceTransformer(
+        (
+            FDSTransformationRule("해야 한다", "하도록 제작한다."),
+            FDSTransformationRule("한다", "하도록 제작한다."),
+        )
+    )
+
+    assert transformer.transform("센서를 설치해야 한다. 경보를 제공해야 한다. (운전 중)") == (
+        "센서를 설치하도록 제작한다. 경보를 제공하도록 제작한다. (운전 중)"
+    )
+    assert transformer.transform("인터록을 제공하도록 제작한다. (기본 사양)") == (
+        "인터록을 제공하도록 제작한다. (기본 사양)"
+    )
+
+
 def test_fds_parser_keeps_only_selected_numbered_range(tmp_path: Path) -> None:
     source = tmp_path / "urs.pdf"
     page = PageExtractionMetadata(
@@ -83,6 +108,24 @@ def test_fds_parser_recovers_number_cell_separated_from_ocr_text(tmp_path: Path)
 
     assert [item.requirement_id for item in statements] == ["7.1", "7.2", "8.1"]
     assert statements[0].original_text == "설치위치 : 1층 멸균준비실"
+
+
+def test_fds_parser_keeps_generic_endings_before_parentheses_and_mid_text(tmp_path: Path) -> None:
+    source = tmp_path / "parenthetical-urs.pdf"
+    text = (
+        "7.1 장비를 정지한다. (비상 상황 발생 시)\n"
+        "7.2 경보를 표시한다. 운전자가 상태를 확인한다.\n"
+        "8.1 선택 범위 밖의 요구사항이다."
+    )
+    page = PageExtractionMetadata(source, 4, DocumentKind.SEARCHABLE_PDF, ExtractionMethod.EMBEDDED_TEXT, text)
+
+    statements = FDSURSParser().parse(
+        DocumentExtractionResult(source, DocumentKind.SEARCHABLE_PDF, (page,)),
+        "7.1",
+        "7.2",
+    )
+
+    assert [item.requirement_id for item in statements] == ["7.1", "7.2"]
 
 
 def test_fds_word_generator_numbers_content_and_formats_malgun_gothic(tmp_path: Path) -> None:

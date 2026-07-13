@@ -39,6 +39,7 @@ DEFAULT_FDS_TRANSFORMATION_RULES = (
 
 _REQUIREMENT_LANGUAGE = re.compile(
     r"\b(shall|must|should|required|requires?)\b|"
+    r"(?:한다|된다|있다|없다)[.,;:!?]*(?=$|[\s()\[\]{}（）【】])|"
     r"해야\s*한다|하여야\s*한다|되어야\s*한다|(?:아|어|여)야\s*한다|"
     r"않아야\s*한다|할\s*수\s*(?:있|없)|하도록|한다\.?$|된다\.?$|있다\.?$|없다\.?$",
     re.IGNORECASE,
@@ -74,7 +75,19 @@ class FDSSentenceTransformer:
     """Apply ordered, user-editable Korean sentence-ending rules."""
 
     def __init__(self, rules: tuple[FDSTransformationRule, ...] = DEFAULT_FDS_TRANSFORMATION_RULES) -> None:
-        self._rules = rules
+        self._rules_by_group: dict[str, tuple[str, str]] = {}
+        alternatives: list[str] = []
+        for index, rule in enumerate(rules):
+            group = f"rule_{index}"
+            source = re.sub(r"\s+", " ", rule.source_ending).strip().rstrip(".").rstrip()
+            target = re.sub(r"\s+", " ", rule.target_ending).strip().rstrip(".").rstrip() + "."
+            self._rules_by_group[group] = (source, target)
+            alternatives.append(f"(?P<{group}>{re.escape(source)})")
+        self._ending_pattern = (
+            re.compile(rf"(?:{'|'.join(alternatives)})[.,;:!?]*(?=$|[\s()\[\]{{}}（）【】])")
+            if alternatives
+            else None
+        )
 
     def transform(self, urs_text: str) -> str:
         """Convert one requirement into a deterministic editable design sentence."""
@@ -84,16 +97,32 @@ class FDSSentenceTransformer:
         sentence = sentence.rstrip(" .")
         if not sentence:
             return ""
+        protected_ranges = tuple(
+            match.span()
+            for _source, target in self._rules_by_group.values()
+            for match in re.finditer(re.escape(target.rstrip(".")), sentence)
+        )
+        changed = False
+
+        def replace_ending(match: re.Match[str]) -> str:
+            nonlocal changed
+            if any(start <= match.start() < end for start, end in protected_ranges):
+                return match.group(0)
+            group = match.lastgroup
+            if group is None:
+                return match.group(0)
+            changed = True
+            target = self._rules_by_group[group][1]
+            following = sentence[match.end() : match.end() + 1]
+            return target + (" " if following and following in "([（【" else "")
+
+        transformed = self._ending_pattern.sub(replace_ending, sentence) if self._ending_pattern else sentence
+        if changed:
+            return transformed
+        if protected_ranges:
+            return sentence
         if sentence.endswith("제작한다"):
             return f"{sentence}."
-        for rule in self._rules:
-            source = rule.source_ending.strip().rstrip(".")
-            if sentence.endswith(source):
-                raw_stem = sentence[: -len(source)]
-                joiner = " " if raw_stem and raw_stem[-1].isspace() else ""
-                stem = raw_stem.rstrip()
-                target = rule.target_ending.strip()
-                return f"{stem}{joiner}{target if target.endswith('.') else target + '.'}"
         stem = sentence[:-1] if sentence.endswith("다") else sentence
         return f"{stem}도록 제작한다."
 
