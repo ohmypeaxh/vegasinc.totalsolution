@@ -18,8 +18,9 @@ from docx.text.paragraph import Paragraph
 from vegas_doc.models.dq_document_data import section_key
 from vegas_doc.models.extraction import DocumentExtractionResult
 from vegas_doc.models.fds_document import FDSDocumentRequest, FDSStatement, FDSTransformationRule
-from vegas_doc.services.dq_processing import section_in_range
+from vegas_doc.services.numbered_text import numbered_text_blocks
 from vegas_doc.services.word_template import open_template_document
+from vegas_doc.utils.date_format import format_document_date
 
 FDS_CONTENT_TOKEN = "##F&DS내용##"
 FDS_LOGO_TOKEN = "##로고##"
@@ -36,7 +37,6 @@ DEFAULT_FDS_TRANSFORMATION_RULES = (
     FDSTransformationRule("한다", "하도록 제작한다."),
 )
 
-_SECTION_BLOCK = re.compile(r"^\s*(?P<number>\d+(?:\.\d+)*)(?:\s+|\s*[|:)\-]\s*)(?P<text>.+)$")
 _REQUIREMENT_LANGUAGE = re.compile(
     r"\b(shall|must|should|required|requires?)\b|"
     r"해야\s*한다|하여야\s*한다|되어야\s*한다|(?:아|어|여)야\s*한다|"
@@ -108,14 +108,9 @@ class FDSURSParser:
         results: list[FDSStatement] = []
         for page in extraction.pages:
             text = page.reviewed_text or page.normalized_text or page.original_text
-            for block in _numbered_blocks(text):
-                match = _SECTION_BLOCK.match(block)
-                if match is None:
-                    continue
-                number = match.group("number")
-                content = re.sub(r"\s+", " ", match.group("text")).strip()
-                if not section_in_range(number, start, end):
-                    continue
+            for block in numbered_text_blocks(text, start, end):
+                number = block.number
+                content = re.sub(r"\s+", " ", block.text).strip()
                 looks_like_requirement = bool(_REQUIREMENT_LANGUAGE.search(content))
                 if len(section_key(number)) <= heading_depth and not looks_like_requirement:
                     continue
@@ -148,7 +143,7 @@ class FDSDocumentGenerator:
             {
                 "##장비명##": request.equipment_name,
                 "##문서번호##": request.document_number,
-                "##작성일##": request.write_date.strftime("%Y-%m-%d"),
+                "##작성일##": format_document_date(request.write_date),
             },
         )
         output_path = _available_output_path(request.output_directory / request.output_filename())
@@ -160,24 +155,6 @@ class FDSDocumentGenerator:
         finally:
             shutil.rmtree(temporary_directory, ignore_errors=True)
         return output_path
-
-
-def _numbered_blocks(text: str) -> tuple[str, ...]:
-    blocks: list[str] = []
-    current: list[str] = []
-    for raw_line in text.splitlines():
-        line = raw_line.strip(" \t•*|")
-        if not line:
-            continue
-        if _SECTION_BLOCK.match(line):
-            if current:
-                blocks.append(" ".join(current))
-            current = [line]
-        elif current:
-            current.append(line)
-    if current:
-        blocks.append(" ".join(current))
-    return tuple(blocks)
 
 
 def _insert_fds_content(document: DocumentObject, statements: tuple[FDSStatement, ...]) -> None:

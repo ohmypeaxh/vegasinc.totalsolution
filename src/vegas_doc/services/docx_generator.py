@@ -19,6 +19,7 @@ from docx.text.paragraph import Paragraph
 from vegas_doc.models.dq_mapping import DQMapping
 from vegas_doc.models.urs import URSRequirement
 from vegas_doc.services.word_template import InvalidTemplateFormatError, open_template_document
+from vegas_doc.utils.date_format import normalize_document_date
 
 LOGO_TOKEN = "##로고##"
 OCR_SECTION_TOKEN = "##OCR요구사항##"
@@ -158,10 +159,13 @@ class DQDocxGenerator:
 
 
 def _context_replacements(context: dict[str, str]) -> dict[str, str]:
-    replacements = {f"##{key.upper()}##": value for key, value in context.items()}
+    normalized_context = dict(context)
+    if "author_date" in normalized_context:
+        normalized_context["author_date"] = normalize_document_date(normalized_context["author_date"])
+    replacements = {f"##{key.upper()}##": value for key, value in normalized_context.items()}
     for key, tokens in CONTEXT_TOKENS.items():
-        if key in context:
-            replacements.update({token: context[key] for token in tokens})
+        if key in normalized_context:
+            replacements.update({token: normalized_context[key] for token in tokens})
     return replacements
 
 

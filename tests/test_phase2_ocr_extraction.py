@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from vegas_doc.models.extraction import DocumentKind, ExtractionMethod, ExtractionPolicy
+from vegas_doc.models.extraction import DocumentExtractionResult, DocumentKind, ExtractionMethod, ExtractionPolicy, PageExtractionMetadata
 from vegas_doc.models.ocr import OCRConfigurationState, OCRConfigurationStatus, OCRPageRequest, OCRPageResult, OCRRequest
 from vegas_doc.services.extraction import ExtractionPolicyEvaluator
+from vegas_doc.services.document_extraction import extraction_failure_message
 from vegas_doc.services.ocr import OCRProvider, ProviderOCRService
 
 
@@ -71,3 +72,21 @@ def test_extraction_policy_prefers_embedded_text_before_ocr() -> None:
     assert DocumentKind.SCANNED_PDF.value == "scanned_pdf"
     assert DocumentKind.MIXED_PDF.value == "mixed_pdf"
     assert DocumentKind.IMAGE.value == "image"
+
+
+def test_missing_clova_secret_becomes_actionable_extraction_error(tmp_path: Path) -> None:
+    source = tmp_path / "scan.pdf"
+    page = PageExtractionMetadata(
+        source,
+        1,
+        DocumentKind.SCANNED_PDF,
+        ExtractionMethod.NOT_EXTRACTED,
+        "",
+        errors=("CLOVA secret key is missing",),
+    )
+
+    message = extraction_failure_message(DocumentExtractionResult(source, DocumentKind.SCANNED_PDF, (page,)))
+
+    assert message is not None
+    assert "Secret Key" in message
+    assert "Settings" in message

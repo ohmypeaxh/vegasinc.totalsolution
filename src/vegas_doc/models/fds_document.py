@@ -8,6 +8,7 @@ from datetime import date
 from pathlib import Path
 
 from vegas_doc.models.dq_document_data import section_key
+from vegas_doc.utils.date_format import format_document_date
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,7 +51,7 @@ class FDSDocumentRequest:
     def output_filename(self) -> str:
         """Return a safe, deterministic F&DS document filename."""
 
-        name = f"{self.document_number}_{self.equipment_name}_FDS_{self.write_date:%Y-%m-%d}"
+        name = f"{self.document_number}_{self.equipment_name}_FDS_{format_document_date(self.write_date)}"
         cleaned = re.sub(r'[\\/:*?"<>|]+', "_", name.strip())
         return f"{cleaned or 'FDS'}.docx"
 

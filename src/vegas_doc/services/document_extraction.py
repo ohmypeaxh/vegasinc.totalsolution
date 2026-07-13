@@ -108,6 +108,34 @@ def _normalize(text: str) -> str:
     return "\n".join(line.strip() for line in text.splitlines() if line.strip())
 
 
+def extraction_failure_message(result: DocumentExtractionResult) -> str | None:
+    """Return an actionable message when no page produced usable text."""
+
+    usable = any(
+        page.extraction_method is not ExtractionMethod.NOT_EXTRACTED
+        and bool((page.reviewed_text or page.normalized_text or page.original_text).strip())
+        for page in result.pages
+    )
+    if usable:
+        return None
+    details = tuple(
+        dict.fromkeys(
+            message
+            for page in result.pages
+            for message in (*page.errors, *page.warnings)
+            if message.strip()
+        )
+    )
+    joined = " ".join(details)
+    if "CLOVA secret key is missing" in joined:
+        return "CLOVA Secret Key가 저장되지 않았습니다. Settings의 OCR 항목에서 Secret Key를 입력하고 저장해 주세요."
+    if "CLOVA Invoke URL is missing" in joined:
+        return "CLOVA Invoke URL이 설정되지 않았습니다. Settings의 OCR 항목에서 URL을 입력하고 저장해 주세요."
+    if details:
+        return "PDF/OCR 텍스트를 추출하지 못했습니다: " + "; ".join(details)
+    return "PDF/OCR 텍스트를 추출하지 못했습니다. 스캔 PDF라면 Settings의 CLOVA OCR 연결을 확인해 주세요."
+
+
 _SECTION_NUMBER = re.compile(r"(?m)^\s*(\d+(?:\.\d+)*)\b")
 
 

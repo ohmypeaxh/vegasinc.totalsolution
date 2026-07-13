@@ -10,6 +10,7 @@ from vegas_doc.models.dq_mapping import DQMapping, DQResponse, MappingRelationsh
 from vegas_doc.models.extraction import DocumentExtractionResult
 from vegas_doc.models.dq_document_data import section_key
 from vegas_doc.models.urs import RequirementPriority, URSRequirement, VerificationMethod
+from vegas_doc.services.numbered_text import numbered_text_blocks
 
 _REQUIREMENT_WORDS = re.compile(r"\b(shall|must|should|required|requires?)\b|해야\s*한다|하여야\s*한다|필수|요구|되어야\s*한다", re.I)
 _OBLIGATION_WORDS = re.compile(r"\b(shall|must|should|required|requires?)\b|해야\s*한다|하여야\s*한다|필수|되어야\s*한다", re.I)
@@ -45,6 +46,9 @@ class DefaultURSParser:
         end_section: str | None = None,
     ) -> tuple[URSRequirement, ...]:
         """Parse traceable requirements, optionally within an inclusive numeric range."""
+
+        if start_section and end_section:
+            return self._parse_numbered_range(extraction, start_section, end_section)
 
         requirements: list[URSRequirement] = []
         seen: dict[str, int] = {}
@@ -84,6 +88,43 @@ class DefaultURSParser:
                         source_section=source_section,
                         original_text=block,
                         normalized_text=_clean_requirement_text(block),
+                        confidence=page.confidence,
+                    )
+                )
+        return tuple(requirements)
+
+    def _parse_numbered_range(
+        self,
+        extraction: DocumentExtractionResult,
+        start_section: str,
+        end_section: str,
+    ) -> tuple[URSRequirement, ...]:
+        """Parse table-style numbered rows, including specification phrases without verbs."""
+
+        requirements: list[URSRequirement] = []
+        seen: dict[str, int] = {}
+        current_section: str | None = None
+        heading_depth = max(len(section_key(start_section)), len(section_key(end_section)))
+        for page in extraction.pages:
+            text = page.reviewed_text or page.normalized_text or page.original_text
+            for block in numbered_text_blocks(text, start_section, end_section):
+                content = _clean_requirement_text(block.text)
+                has_obligation = bool(_OBLIGATION_WORDS.search(content))
+                if len(section_key(block.number)) <= heading_depth and not has_obligation:
+                    current_section = f"{block.number} {content}".strip()
+                    continue
+                if not content:
+                    continue
+                seen[block.number] = seen.get(block.number, 0) + 1
+                requirement_id = block.number if seen[block.number] == 1 else f"{block.number}-DUP{seen[block.number]}"
+                requirements.append(
+                    URSRequirement(
+                        requirement_id=requirement_id,
+                        source_document=page.source_path,
+                        source_page=page.page_number,
+                        source_section=current_section or _parent_section(block.number),
+                        original_text=f"{block.number} {content}",
+                        normalized_text=content,
                         confidence=page.confidence,
                     )
                 )

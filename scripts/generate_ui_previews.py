@@ -10,8 +10,8 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 os.environ.pop("VEGAS_CLOVA_INVOKE_URL", None)
 os.environ.pop("VEGAS_CLOVA_SECRET_KEY", None)
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QLineEdit
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtWidgets import QApplication, QLineEdit, QScrollArea, QWidget
 
 from vegas_doc.app.main import create_main_window, get_or_create_application
 from vegas_doc.builtin_plugins.dq_generator import DQGeneratorWidget
@@ -47,6 +47,16 @@ def _process_events(app: QApplication) -> None:
 
     for _ in range(3):
         app.processEvents()
+
+
+def _scroll_to_widget(scroll: QScrollArea, widget: QWidget, top_margin: int = 20) -> None:
+    """Place the target widget near the top of its real scroll viewport."""
+
+    content = scroll.widget()
+    if content is None:
+        return
+    target_y = widget.mapTo(content, QPoint(0, 0)).y()
+    scroll.verticalScrollBar().setValue(max(0, target_y - top_margin))
 
 
 def _save_widget(widget, filename: str, app: QApplication) -> None:  # type: ignore[no-untyped-def]
@@ -126,6 +136,9 @@ def generate_previews() -> None:
         dq_widget = _select_plugin(window, "dq", app)
         if not isinstance(dq_widget, DQGeneratorWidget):
             raise TypeError("DQ plugin did not provide the production DQGeneratorWidget")
+        dq_scroll = dq_widget.findChild(QScrollArea, "WorkspaceScroll")
+        if dq_scroll is None:
+            raise RuntimeError("DQ workspace scroll area was not found")
 
         dq_widget.project_name.setText("Demo Sterile Mixing System")
         dq_widget.document_number.setText("DQ-DEMO-001")
@@ -145,6 +158,8 @@ def generate_previews() -> None:
             "URS-DEMO-002 The demo system shall stop safely when an interlock is active."
         )
         dq_widget.status.setText("샘플 OCR 텍스트 검토")
+        _scroll_to_widget(dq_scroll, dq_widget.page_review)
+        _process_events(app)
         _save_widget(window, "04_dq_generator_ocr_review.png", app)
 
         requirements = _sample_requirements()
@@ -161,11 +176,15 @@ def generate_previews() -> None:
         dq_widget.model.set_items(requirements, responses)
         dq_widget.table.resizeColumnsToContents()
         dq_widget.status.setText("2개의 샘플 요구사항을 검토했습니다.")
+        _scroll_to_widget(dq_scroll, dq_widget.table)
+        _process_events(app)
         _save_widget(window, "05_dq_generator_requirement_review.png", app)
 
         dq_widget.template_path.setText(str(Path("templates") / "default_dq_template.docx"))
         dq_widget.output_path.setText(str(Path("output") / "DQ-DEMO-001.docx"))
         dq_widget.status.setText("템플릿 및 출력 경로 검토 완료 — 생성 준비")
+        _scroll_to_widget(dq_scroll, dq_widget.output_directory_input)
+        _process_events(app)
         _save_widget(window, "06_dq_generator_template_output.png", app)
 
         settings_widget = _select_plugin(window, "settings", app)
@@ -205,6 +224,11 @@ def generate_previews() -> None:
         )
         fds_widget.status.setText("미리보기용 URS 2개를 변환했습니다.")
         fds_widget.tabs.setCurrentIndex(0)
+        fds_scroll = fds_widget.findChild(QScrollArea, "WorkspaceScroll")
+        if fds_scroll is None:
+            raise RuntimeError("F&DS workspace scroll area was not found")
+        _scroll_to_widget(fds_scroll, fds_widget.review_table)
+        _process_events(app)
         _save_widget(window, "10_fds_generator.png", app)
         fds_widget.tabs.setCurrentIndex(1)
         _save_widget(window, "11_fds_rules.png", app)

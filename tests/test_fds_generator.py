@@ -63,6 +63,28 @@ def test_fds_parser_keeps_only_selected_numbered_range(tmp_path: Path) -> None:
     assert all(item.source_page == 2 for item in statements)
 
 
+def test_fds_parser_recovers_number_cell_separated_from_ocr_text(tmp_path: Path) -> None:
+    source = tmp_path / "scanned-urs.pdf"
+    ocr_text = (
+        "7.\n설계 요구사항\nNo.\n요구사항\n"
+        "7 . 1\n설치위치 : 1층 멸균준비실\n"
+        "7.2\n설치수량 : 1 대\n"
+        "8.\n기능 요구사항\n"
+        "8.1\n패스박스 도어에 인터록 기능이 있어야 한다.\n"
+        "9.\n범위 밖\n9.1\n제외하여야 한다."
+    )
+    page = PageExtractionMetadata(source, 9, DocumentKind.SCANNED_PDF, ExtractionMethod.OCR, ocr_text, ocr_text)
+
+    statements = FDSURSParser().parse(
+        DocumentExtractionResult(source, DocumentKind.SCANNED_PDF, (page,)),
+        "7",
+        "8",
+    )
+
+    assert [item.requirement_id for item in statements] == ["7.1", "7.2", "8.1"]
+    assert statements[0].original_text == "설치위치 : 1층 멸균준비실"
+
+
 def test_fds_word_generator_numbers_content_and_formats_malgun_gothic(tmp_path: Path) -> None:
     template = tmp_path / "fds-template.docx"
     logo = tmp_path / "logo.png"
@@ -95,8 +117,8 @@ def test_fds_word_generator_numbers_content_and_formats_malgun_gothic(tmp_path: 
 
     rendered = Document(output)
     text = "\n".join(paragraph.text for paragraph in rendered.paragraphs)
-    assert output.name == "FDS-001_Weighing Booth_FDS_2026-07-13.docx"
-    assert "장비: Weighing Booth / 문서: FDS-001 / 날짜: 2026-07-13" in text
+    assert output.name == "FDS-001_Weighing Booth_FDS_2026.07.13.docx"
+    assert "장비: Weighing Booth / 문서: FDS-001 / 날짜: 2026.07.13" in text
     assert "5.2.1. 모서리가 뾰족하지 않도록 제작한다." in text
     assert "5.2.2. 확인할 수 있도록 제작한다." in text
     assert "##F&DS내용##" not in text
@@ -121,4 +143,6 @@ def test_fds_widget_contains_generator_and_rules_tabs(tmp_path: Path, qapp) -> N
     assert widget.urs_input.acceptDrops()
     assert widget.logo_input.acceptDrops()
     assert widget.write_date.calendarPopup()
+    assert widget.write_date.displayFormat() == "yyyy.MM.dd"
+    assert widget.review_table.minimumHeight() >= 480
     assert context.services.resolve(ConfigManager).load()["fds_transformation_rules"][0]["target_ending"] == "테스트 규칙으로 제작한다."

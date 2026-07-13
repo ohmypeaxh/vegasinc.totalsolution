@@ -36,7 +36,7 @@ from vegas_doc.models.extraction import DocumentKind, ExtractionPolicy
 from vegas_doc.models.fds_document import FDSDocumentRequest, FDSStatement, FDSTransformationRule
 from vegas_doc.plugins.plugin import Plugin, PluginMetadata
 from vegas_doc.services.clova_ocr import ClovaOCRProvider, ClovaOCRSettings
-from vegas_doc.services.document_extraction import PyMuPDFDocumentTextExtractor
+from vegas_doc.services.document_extraction import PyMuPDFDocumentTextExtractor, extraction_failure_message
 from vegas_doc.services.fds_generator import (
     DEFAULT_FDS_TRANSFORMATION_RULES,
     FDSDocumentGenerator,
@@ -48,6 +48,7 @@ from vegas_doc.services.fds_generator import (
 from vegas_doc.services.ocr import ProviderOCRService
 from vegas_doc.services.secrets import KeyringSecretStore
 from vegas_doc.ui.widgets.file_path_input import FilePathInput
+from vegas_doc.utils.date_format import QT_DOCUMENT_DATE_FORMAT
 
 
 class FDSExtractionWorker(QObject):
@@ -87,6 +88,9 @@ class FDSExtractionWorker(QObject):
                 self._start_section,
                 self._end_section,
             )
+            failure = extraction_failure_message(extraction)
+            if failure is not None:
+                raise RuntimeError(failure)
             self.progress.emit(70, "F&DS 문장 규칙을 적용하고 있습니다...")
             parsed = FDSURSParser().parse(extraction, self._start_section, self._end_section)
             transformer = FDSSentenceTransformer(self._rules)
@@ -153,7 +157,7 @@ class FDSGeneratorWidget(QWidget):
         )
         self.write_date = QDateEdit(QDate.currentDate())
         self.write_date.setCalendarPopup(True)
-        self.write_date.setDisplayFormat("yyyy-MM-dd")
+        self.write_date.setDisplayFormat(QT_DOCUMENT_DATE_FORMAT)
         info_form.addRow("장비명 *", self.equipment_name)
         info_form.addRow("문서번호 *", self.document_number)
         info_form.addRow("회사 로고 *", self.logo_input)
@@ -186,7 +190,8 @@ class FDSGeneratorWidget(QWidget):
         self.review_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.review_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.review_table.setAlternatingRowColors(True)
-        self.review_table.setMinimumHeight(250)
+        self.review_table.setMinimumHeight(480)
+        review_group.setMinimumHeight(560)
         review_layout.addWidget(self.review_table)
         review_note = QLabel("F&DS 변환 내용 열은 Word 생성 전에 직접 수정할 수 있습니다. 번호는 5.2.1부터 자동 부여됩니다.")
         review_note.setObjectName("MutedText")

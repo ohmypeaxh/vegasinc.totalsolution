@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QAbstractTableModel, QDate, QModelIndex, QObject, Qt, QThread, Signal
 from PySide6.QtGui import QBrush, QColor
-from PySide6.QtWidgets import (QComboBox, QDateEdit, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QScrollArea, QTableView, QTextEdit, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QDateEdit, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QScrollArea, QTableView, QTextEdit, QVBoxLayout, QWidget)
 
 from vegas_doc.core.application_context import ApplicationContext
 from vegas_doc.core.config_manager import ConfigManager
@@ -19,7 +19,7 @@ from vegas_doc.models.project import DQProject, PROJECT_SCHEMA_VERSION, ProjectI
 from vegas_doc.models.urs import URSRequirement
 from vegas_doc.plugins.plugin import Plugin, PluginMetadata
 from vegas_doc.services.clova_ocr import ClovaOCRProvider, ClovaOCRSettings
-from vegas_doc.services.document_extraction import PyMuPDFDocumentTextExtractor
+from vegas_doc.services.document_extraction import PyMuPDFDocumentTextExtractor, extraction_failure_message
 from vegas_doc.services.docx_generator import DQDocxGenerator
 from vegas_doc.services.dq_processing import DQProjectValidator, DQSuggestionService, DefaultURSParser, KeywordRequirementClassifier, build_mappings
 from vegas_doc.services.ocr import ProviderOCRService
@@ -27,6 +27,7 @@ from vegas_doc.services.project_persistence import DQProjectRepository
 from vegas_doc.services.secrets import KeyringSecretStore
 from vegas_doc.services.word_template import InvalidTemplateFormatError
 from vegas_doc.ui.widgets.file_path_input import FilePathInput
+from vegas_doc.utils.date_format import QT_DOCUMENT_DATE_FORMAT, format_document_date
 
 
 class DQExtractionWorker(QObject):
@@ -61,6 +62,9 @@ class DQExtractionWorker(QObject):
                 self._start_section,
                 self._end_section,
             )
+            failure = extraction_failure_message(extraction)
+            if failure is not None:
+                raise RuntimeError(failure)
             if self._cancelled:
                 self.failed.emit("작업이 취소되었습니다.")
                 return
@@ -242,10 +246,9 @@ class DQGeneratorWidget(QWidget):
         self.author_name = QLineEdit()
         self.author_date = QDateEdit(QDate.currentDate())
         self.author_date.setCalendarPopup(True)
-        self.author_date.setDisplayFormat("yyyy-MM-dd")
-        self.author_position = QComboBox()
-        self.author_position.setEditable(True)
-        self.author_position.addItems(["대표이사", "부장", "차장", "과장", "대리", "사원"])
+        self.author_date.setDisplayFormat(QT_DOCUMENT_DATE_FORMAT)
+        self.author_position = QLineEdit()
+        self.author_position.setPlaceholderText("직위를 직접 입력하세요.")
         self.vendor_name = QLineEdit()
         for label, widget in (
             ("문서번호 *", self.document_number),
@@ -299,12 +302,17 @@ class DQGeneratorWidget(QWidget):
         review_layout = QVBoxLayout(review_group)
         self.page_review = QTextEdit()
         self.page_review.setPlaceholderText("PDF/OCR 원문 검토 및 수정 영역")
+        self.page_review.setMinimumHeight(320)
         self.model = RequirementTableModel()
         self.table = QTableView()
         self.table.setModel(self.model)
         self.table.setSortingEnabled(False)
+        self.table.setMinimumHeight(480)
+        review_group.setMinimumHeight(900)
         review_layout.addWidget(self.page_review)
         review_layout.addWidget(self.table)
+        review_layout.setStretch(0, 2)
+        review_layout.setStretch(1, 3)
         review_actions = QHBoxLayout()
         for text, slot in (
             ("행 추가", self.add_review_row),
@@ -368,7 +376,7 @@ class DQGeneratorWidget(QWidget):
             equipment_name=self.equipment_name.text().strip(),
             author_name=self.author_name.text().strip(),
             author_date=self.author_date.date().toPython(),
-            author_position=self.author_position.currentText().strip(),
+            author_position=self.author_position.text().strip(),
             vendor_name=self.vendor_name.text().strip(),
             start_requirement=self.start_requirement.text().strip(),
             end_requirement=self.end_requirement.text().strip(),
@@ -377,7 +385,7 @@ class DQGeneratorWidget(QWidget):
         )
 
     def reset_inputs(self) -> None:
-        for field in (self.document_number, self.equipment_name, self.author_name, self.vendor_name, self.logo_path, self.template_path, self.source_path, self.output_filename):
+        for field in (self.document_number, self.equipment_name, self.author_name, self.author_position, self.vendor_name, self.logo_path, self.template_path, self.source_path, self.output_filename):
             field.clear()
         self.version_number.setText("1.0")
         self.author_date.setDate(QDate.currentDate())
@@ -452,7 +460,12 @@ class DQGeneratorWidget(QWidget):
         self._extraction, requirements, responses, self._mappings = payload
         self.model.set_items(requirements, responses)
         if self._extraction and self._extraction.pages:
-            self.page_review.setPlainText(self._extraction.pages[0].reviewed_text or self._extraction.pages[0].normalized_text or self._extraction.pages[0].original_text)
+            previews = []
+            for page in self._extraction.pages:
+                text = page.reviewed_text or page.normalized_text or page.original_text
+                if text.strip():
+                    previews.append(f"[Page {page.page_number}]\n{text.strip()}")
+            self.page_review.setPlainText("\n\n".join(previews))
         self.progress.setValue(100)
         if requirements:
             self.status.setText(f"추출 및 분석이 완료되었습니다. ({len(requirements)}개)")
@@ -486,7 +499,7 @@ class DQGeneratorWidget(QWidget):
                 "version_number": self.version_number.text().strip(),
                 "author_name": self.author_name.text().strip(),
                 "author_date": self.author_date.date().toString("yyyy-MM-dd"),
-                "author_position": self.author_position.currentText().strip(),
+                "author_position": self.author_position.text().strip(),
                 "vendor_name": self.vendor_name.text().strip(),
                 "logo_path": self.logo_path.text().strip(),
                 "start_requirement": self.start_requirement.text().strip(),
@@ -517,7 +530,7 @@ class DQGeneratorWidget(QWidget):
             self.author_name.setText(values.get("author_name", ""))
             if values.get("author_date"):
                 self.author_date.setDate(QDate.fromString(values["author_date"], "yyyy-MM-dd"))
-            self.author_position.setCurrentText(values.get("author_position", ""))
+            self.author_position.setText(values.get("author_position", ""))
             self.vendor_name.setText(values.get("vendor_name", ""))
             self.logo_path.setText(values.get("logo_path", ""))
             self.start_requirement.setText(values.get("start_requirement", "6.4"))
@@ -560,7 +573,7 @@ class DQGeneratorWidget(QWidget):
             "version_number": data.version_number,
             "equipment_name": data.equipment_name,
             "author_name": data.author_name,
-            "author_date": data.author_date.strftime("%Y-%m-%d"),
+            "author_date": format_document_date(data.author_date),
             "author_position": data.author_position,
             "vendor_name": data.vendor_name,
         }

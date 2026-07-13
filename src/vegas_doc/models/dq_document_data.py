@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
+from vegas_doc.utils.date_format import format_document_date
+
 _INVALID_WINDOWS_FILENAME = re.compile(r'[\\/:*?"<>|]')
 _SECTION_NUMBER = re.compile(r"^\d+(?:\.\d+)*$")
 
@@ -66,7 +68,7 @@ class DQDocumentData:
     def resolved_output_filename(self) -> str:
         requested = self.output_filename.strip()
         if not requested:
-            requested = f"{self.document_number}_{self.equipment_name}_DQ_{self.author_date:%Y-%m-%d}.docx"
+            requested = f"{self.document_number}_{self.equipment_name}_DQ_{format_document_date(self.author_date)}.docx"
         safe = _INVALID_WINDOWS_FILENAME.sub("_", requested).strip(" .")
         if not safe.lower().endswith(".docx"):
             safe += ".docx"

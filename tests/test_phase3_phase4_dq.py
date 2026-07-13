@@ -92,6 +92,7 @@ def test_korean_placeholders_logo_and_repeating_table(tmp_path: Path) -> None:
     all_text += "\n" + rendered.sections[0].footer.paragraphs[0].text
     assert not any(token in all_text for token in REQUIRED_DQ_PLACEHOLDERS)
     assert "DQ-001 / 1.0 / 혼합기" in all_text
+    assert "2026.07.13" in all_text
     assert "6.4.1" in all_text and "6.5.1" in all_text
     assert "두 번째 요구사항" in all_text
     assert len(rendered.tables[0].rows) == 5
@@ -161,6 +162,41 @@ def test_hierarchical_range_parser_and_page_selection(tmp_path: Path) -> None:
     assert section_in_range("6.8.1", "6.4", "6.8")
     assert not section_in_range("6.10", "6.4", "6.8")
     assert _range_page_numbers(("1. 소개", "6.4 제목\n6.4.1 내용", "6.5.1 내용", "9. 부록"), "6.4", "6.5") == {2, 3}
+
+
+def test_dq_parser_recovers_split_ocr_table_rows_without_obligation_verbs(tmp_path: Path) -> None:
+    """Scanned URS tables keep numbered noun-style specifications in the selected range."""
+
+    source = tmp_path / "scanned-urs.pdf"
+    ocr_text = (
+        "7.\n설계 요구사항\nNo.\n요구사항\n공급자 확인\n"
+        "7.1\n설치위치 : 1층 멸균준비실\n"
+        "7.2\n설치수량 : 1 대\n"
+        "7.3\n패스박스 크기 : 750(W) * 665(D) * 1500(H)\n"
+        "7.31\n구성품의 라벨링\n1) 제조사명 및 모델번호\n2) 공급자 제품문서와 동일\n"
+        "8.\n기능 요구사항\n"
+        "8.1\n패스박스 도어에 인터록 기능이 있어야 한다.\n"
+        "9.\n품질보증 요구사항\n9.1\n범위 밖 요구사항을 제출하여야 한다."
+    )
+    page = PageExtractionMetadata(
+        source,
+        9,
+        DocumentKind.SCANNED_PDF,
+        ExtractionMethod.OCR,
+        ocr_text,
+        ocr_text,
+    )
+
+    parsed = DefaultURSParser().parse(
+        DocumentExtractionResult(source, DocumentKind.SCANNED_PDF, (page,)),
+        "7",
+        "8",
+    )
+
+    assert [item.requirement_id for item in parsed] == ["7.1", "7.2", "7.3", "7.31", "8.1"]
+    assert parsed[0].normalized_text == "설치위치 : 1층 멸균준비실"
+    assert parsed[3].normalized_text.endswith("1) 제조사명 및 모델번호 2) 공급자 제품문서와 동일")
+    assert parsed[-1].source_section == "8 기능 요구사항"
 
 
 def test_review_model_add_edit_delete_and_reorder(tmp_path: Path, qapp) -> None:  # type: ignore[no-untyped-def]
