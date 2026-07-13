@@ -15,6 +15,7 @@ datas = collect_data_files(
 datas += [
     ("assets/app.ico", "vegas_doc/resources/branding"),
     ("assets/app.png", "vegas_doc/resources/branding"),
+    ("assets/vegas_logo.png", "vegas_doc/resources/branding"),
 ]
 excludes = [
     "pytest", "pytest_qt", "pip", "setuptools", "wheel", "distutils",

@@ -75,25 +75,19 @@ def test_loader_isolates_broken_plugins(tmp_path) -> None:
     assert "boom" in result.errors[0].message
 
 
-def test_builtin_plugins_load_in_navigation_order() -> None:
+def test_builtin_plugins_load_in_navigation_order(tmp_path) -> None:  # type: ignore[no-untyped-def]
     """Built-in placeholder modules are discovered without MainWindow changes."""
 
     require_qt()
     from vegas_doc.config.defaults import AppSettings
     from vegas_doc.core.application_context import build_application_context
 
-    context = build_application_context(AppSettings())
+    context = build_application_context(AppSettings(), data_dir=tmp_path)
     plugins = PluginManager(PluginLoader(context.settings.plugins_package)).load_installed()
 
     assert [plugin.metadata.name for plugin in plugins] == [
         "Manual Generator",
         "DQ Generator",
-        "IQ Generator",
-        "OQ Generator",
-        "PQ Generator",
-        "URS OCR",
-        "PLC Generator",
-        "Alarm Generator",
-        "Excel Helper",
+        "F&DS Generator",
         "Settings",
     ]

@@ -15,10 +15,12 @@ from PySide6.QtWidgets import QApplication, QLineEdit
 
 from vegas_doc.app.main import create_main_window, get_or_create_application
 from vegas_doc.builtin_plugins.dq_generator import DQGeneratorWidget
+from vegas_doc.builtin_plugins.fds_generator import FDSGeneratorWidget
 from vegas_doc.builtin_plugins.settings import SettingsWidget
 from vegas_doc.core.application_context import build_application_context
 from vegas_doc.core.theme_manager import ThemeManager
 from vegas_doc.models.dq_mapping import DQResponse
+from vegas_doc.models.fds_document import FDSStatement
 from vegas_doc.models.urs import URSRequirement
 from vegas_doc.ui.about_dialog import AboutDialog
 from vegas_doc.ui.onboarding_wizard import OnboardingWizard
@@ -35,6 +37,8 @@ EXPECTED_SCREENSHOTS = (
     "07_settings_ocr.png",
     "08_first_run_onboarding.png",
     "09_about_dialog.png",
+    "10_fds_generator.png",
+    "11_fds_rules.png",
 )
 
 
@@ -173,6 +177,37 @@ def generate_previews() -> None:
         settings_widget.timeout.setValue(60)
         settings_widget.status.setText("미리보기용 값입니다. 실제 자격증명은 포함되지 않습니다.")
         _save_widget(window, "07_settings_ocr.png", app)
+
+        fds_widget = _select_plugin(window, "fds", app)
+        if not isinstance(fds_widget, FDSGeneratorWidget):
+            raise TypeError("F&DS plugin did not provide the production FDSGeneratorWidget")
+        fds_widget.equipment_name.setText("Demo Sterile Mixing System")
+        fds_widget.document_number.setText("FDS-DEMO-001")
+        fds_widget.urs_input.set_path(Path("sample-data") / "demo_urs.pdf")
+        fds_widget.logo_input.set_path(Path("sample-data") / "vegas_demo_logo.png")
+        fds_widget.template_input.set_path(Path("templates") / "demo_fds_template.docx")
+        fds_widget.output_directory.set_path(Path("output"))
+        fds_widget._populate_review(
+            (
+                FDSStatement(
+                    "6.4.1",
+                    3,
+                    "모서리가 뾰족하지 않아야 한다.",
+                    "모서리가 뾰족하지 않도록 제작한다.",
+                ),
+                FDSStatement(
+                    "6.4.2",
+                    4,
+                    "작업자가 기록을 확인할 수 있어야 한다.",
+                    "작업자가 기록을 확인할 수 있도록 제작한다.",
+                ),
+            )
+        )
+        fds_widget.status.setText("미리보기용 URS 2개를 변환했습니다.")
+        fds_widget.tabs.setCurrentIndex(0)
+        _save_widget(window, "10_fds_generator.png", app)
+        fds_widget.tabs.setCurrentIndex(1)
+        _save_widget(window, "11_fds_rules.png", app)
 
         onboarding = OnboardingWizard(window)
         onboarding.template_path.setText(str(Path("templates") / "default_dq_template.docx"))

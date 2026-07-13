@@ -25,6 +25,7 @@ from vegas_doc.services.dq_processing import DQProjectValidator, DQSuggestionSer
 from vegas_doc.services.ocr import ProviderOCRService
 from vegas_doc.services.project_persistence import DQProjectRepository
 from vegas_doc.services.secrets import KeyringSecretStore
+from vegas_doc.services.word_template import InvalidTemplateFormatError
 from vegas_doc.ui.widgets.file_path_input import FilePathInput
 
 
@@ -212,11 +213,22 @@ class DQGeneratorWidget(QWidget):
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
+        root.setContentsMargins(28, 24, 28, 24)
+        root.setSpacing(8)
+        eyebrow = QLabel("DOCUMENT AUTOMATION")
+        eyebrow.setObjectName("Eyebrow")
+        root.addWidget(eyebrow)
         title = QLabel("DQ Generator")
         title.setObjectName("PageTitle")
         root.addWidget(title)
+        subtitle = QLabel("URS 요구사항을 검토하고 검증 가능한 Design Qualification 문서를 생성합니다.")
+        subtitle.setObjectName("PageSubtitle")
+        subtitle.setWordWrap(True)
+        root.addWidget(subtitle)
+        root.addSpacing(12)
 
         scroll = QScrollArea()
+        scroll.setObjectName("WorkspaceScroll")
         scroll.setWidgetResizable(True)
         content = QWidget()
         content_layout = QVBoxLayout(content)
@@ -528,9 +540,13 @@ class DQGeneratorWidget(QWidget):
         errors = data.validation_errors()
         errors.extend(DQProjectValidator().validate_for_generation(data.equipment_name, requirements, mappings, data.template_path, output))
         if data.template_path.is_file():
-            missing = self._generator.missing_placeholders(data.template_path)
-            if missing:
-                errors.append("필수 Placeholder를 찾을 수 없습니다: " + ", ".join(missing))
+            try:
+                missing = self._generator.missing_placeholders(data.template_path)
+            except InvalidTemplateFormatError as error:
+                errors.append(str(error))
+            else:
+                if missing:
+                    errors.append("필수 Placeholder를 찾을 수 없습니다: " + ", ".join(missing))
         if errors:
             QMessageBox.warning(self, "생성 전 확인", "\n".join(dict.fromkeys(errors)))
             return

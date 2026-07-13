@@ -1,0 +1,269 @@
+"""URS-to-F&DS transformation rules, parsing, and Word generation."""
+
+from __future__ import annotations
+
+import re
+import shutil
+import tempfile
+from pathlib import Path
+from typing import Iterator
+
+from docx.document import Document as DocumentObject
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Cm, Pt
+from docx.table import Table
+from docx.text.paragraph import Paragraph
+
+from vegas_doc.models.dq_document_data import section_key
+from vegas_doc.models.extraction import DocumentExtractionResult
+from vegas_doc.models.fds_document import FDSDocumentRequest, FDSStatement, FDSTransformationRule
+from vegas_doc.services.dq_processing import section_in_range
+from vegas_doc.services.word_template import open_template_document
+
+FDS_CONTENT_TOKEN = "##F&DS내용##"
+FDS_LOGO_TOKEN = "##로고##"
+DEFAULT_FDS_TRANSFORMATION_RULES = (
+    FDSTransformationRule("할 수 없어야 한다", "할 수 없도록 제작한다."),
+    FDSTransformationRule("할 수 있어야 한다", "할 수 있도록 제작한다."),
+    FDSTransformationRule("할 수 있다", "할 수 있도록 제작한다."),
+    FDSTransformationRule("하지 않아야 한다", "하지 않도록 제작한다."),
+    FDSTransformationRule("않아야 한다", "않도록 제작한다."),
+    FDSTransformationRule("이어야 한다", "이도록 제작한다."),
+    FDSTransformationRule("되어야 한다", "되도록 제작한다."),
+    FDSTransformationRule("하여야 한다", "하도록 제작한다."),
+    FDSTransformationRule("해야 한다", "하도록 제작한다."),
+    FDSTransformationRule("한다", "하도록 제작한다."),
+)
+
+_SECTION_BLOCK = re.compile(r"^\s*(?P<number>\d+(?:\.\d+)*)(?:\s+|\s*[|:)\-]\s*)(?P<text>.+)$")
+_REQUIREMENT_LANGUAGE = re.compile(
+    r"\b(shall|must|should|required|requires?)\b|"
+    r"해야\s*한다|하여야\s*한다|되어야\s*한다|(?:아|어|여)야\s*한다|"
+    r"않아야\s*한다|할\s*수\s*(?:있|없)|하도록|한다\.?$|된다\.?$|있다\.?$|없다\.?$",
+    re.IGNORECASE,
+)
+
+
+def transformation_rules_from_config(value: object) -> tuple[FDSTransformationRule, ...]:
+    """Safely decode persisted editable rules, falling back to defaults."""
+
+    if not isinstance(value, list):
+        return DEFAULT_FDS_TRANSFORMATION_RULES
+    rules: list[FDSTransformationRule] = []
+    try:
+        for item in value:
+            if not isinstance(item, dict):
+                raise ValueError
+            rules.append(FDSTransformationRule(str(item["source_ending"]).strip(), str(item["target_ending"]).strip()))
+    except (KeyError, TypeError, ValueError):
+        return DEFAULT_FDS_TRANSFORMATION_RULES
+    return tuple(rules) if rules else DEFAULT_FDS_TRANSFORMATION_RULES
+
+
+def transformation_rules_to_config(rules: tuple[FDSTransformationRule, ...]) -> list[dict[str, str]]:
+    """Serialize rules into ConfigManager-compatible JSON values."""
+
+    return [
+        {"source_ending": rule.source_ending, "target_ending": rule.target_ending}
+        for rule in rules
+    ]
+
+
+class FDSSentenceTransformer:
+    """Apply ordered, user-editable Korean sentence-ending rules."""
+
+    def __init__(self, rules: tuple[FDSTransformationRule, ...] = DEFAULT_FDS_TRANSFORMATION_RULES) -> None:
+        self._rules = rules
+
+    def transform(self, urs_text: str) -> str:
+        """Convert one requirement into a deterministic editable design sentence."""
+
+        sentence = re.sub(r"\s+", " ", urs_text).strip()
+        sentence = re.sub(r"^(?:URS[-_\s]?)?\d+(?:\.\d+)*(?:\s+|\s*[|:)\-]\s*)", "", sentence, flags=re.IGNORECASE)
+        sentence = sentence.rstrip(" .")
+        if not sentence:
+            return ""
+        if sentence.endswith("제작한다"):
+            return f"{sentence}."
+        for rule in self._rules:
+            source = rule.source_ending.strip().rstrip(".")
+            if sentence.endswith(source):
+                raw_stem = sentence[: -len(source)]
+                joiner = " " if raw_stem and raw_stem[-1].isspace() else ""
+                stem = raw_stem.rstrip()
+                target = rule.target_ending.strip()
+                return f"{stem}{joiner}{target if target.endswith('.') else target + '.'}"
+        stem = sentence[:-1] if sentence.endswith("다") else sentence
+        return f"{stem}도록 제작한다."
+
+
+class FDSURSParser:
+    """Parse numbered requirement sentences inside an inclusive section range."""
+
+    def parse(self, extraction: DocumentExtractionResult, start: str, end: str) -> tuple[FDSStatement, ...]:
+        """Return traceable source statements without text outside the selected range."""
+
+        heading_depth = max(len(section_key(start)), len(section_key(end)))
+        results: list[FDSStatement] = []
+        for page in extraction.pages:
+            text = page.reviewed_text or page.normalized_text or page.original_text
+            for block in _numbered_blocks(text):
+                match = _SECTION_BLOCK.match(block)
+                if match is None:
+                    continue
+                number = match.group("number")
+                content = re.sub(r"\s+", " ", match.group("text")).strip()
+                if not section_in_range(number, start, end):
+                    continue
+                looks_like_requirement = bool(_REQUIREMENT_LANGUAGE.search(content))
+                if len(section_key(number)) <= heading_depth and not looks_like_requirement:
+                    continue
+                if not looks_like_requirement and len(content) < 10:
+                    continue
+                results.append(FDSStatement(number, page.page_number, content, content))
+        return tuple(results)
+
+
+class FDSDocumentGenerator:
+    """Render reviewed F&DS statements into a Word template."""
+
+    def generate(self, request: FDSDocumentRequest) -> Path:
+        """Validate, render required tokens, and atomically save the DOCX output."""
+
+        errors = request.validation_errors()
+        if errors:
+            raise ValueError("\n".join(errors))
+        document = open_template_document(request.template_path)
+        searchable = "\n".join(_paragraph_text(item) for item in _all_paragraphs(document))
+        required = ("##장비명##", "##문서번호##", FDS_LOGO_TOKEN, "##작성일##", FDS_CONTENT_TOKEN)
+        missing = tuple(token for token in required if token not in searchable)
+        if missing:
+            raise ValueError("Word 템플릿에서 필수 Placeholder를 찾을 수 없습니다: " + ", ".join(missing))
+
+        _replace_logo(document, request.logo_path)
+        _insert_fds_content(document, request.statements)
+        _replace_text(
+            document,
+            {
+                "##장비명##": request.equipment_name,
+                "##문서번호##": request.document_number,
+                "##작성일##": request.write_date.strftime("%Y-%m-%d"),
+            },
+        )
+        output_path = _available_output_path(request.output_directory / request.output_filename())
+        temporary_directory = Path(tempfile.mkdtemp(prefix="vegas_fds_", dir=request.output_directory))
+        temporary_output = temporary_directory / output_path.name
+        try:
+            document.save(temporary_output)
+            temporary_output.replace(output_path)
+        finally:
+            shutil.rmtree(temporary_directory, ignore_errors=True)
+        return output_path
+
+
+def _numbered_blocks(text: str) -> tuple[str, ...]:
+    blocks: list[str] = []
+    current: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip(" \t•*|")
+        if not line:
+            continue
+        if _SECTION_BLOCK.match(line):
+            if current:
+                blocks.append(" ".join(current))
+            current = [line]
+        elif current:
+            current.append(line)
+    if current:
+        blocks.append(" ".join(current))
+    return tuple(blocks)
+
+
+def _insert_fds_content(document: DocumentObject, statements: tuple[FDSStatement, ...]) -> None:
+    anchor = next((item for item in _all_paragraphs(document) if FDS_CONTENT_TOKEN in _paragraph_text(item)), None)
+    if anchor is None:
+        raise ValueError(f"Word 템플릿에서 {FDS_CONTENT_TOKEN} Placeholder를 찾을 수 없습니다.")
+    before, _, after = _paragraph_text(anchor).partition(FDS_CONTENT_TOKEN)
+    _set_paragraph_text(anchor, before)
+    current_xml = anchor._p  # noqa: SLF001
+    for index, statement in enumerate(statements, start=1):
+        paragraph_xml = OxmlElement("w:p")
+        current_xml.addnext(paragraph_xml)
+        paragraph = Paragraph(paragraph_xml, anchor._parent)  # noqa: SLF001
+        run = paragraph.add_run(f"5.2.{index}. {statement.generated_text.strip()}")
+        run.font.name = "맑은 고딕"
+        run.font.size = Pt(10)
+        run._element.get_or_add_rPr().rFonts.set(qn("w:eastAsia"), "맑은 고딕")  # noqa: SLF001
+        paragraph.paragraph_format.space_after = Pt(0)
+        current_xml = paragraph_xml
+    if after:
+        paragraph_xml = OxmlElement("w:p")
+        current_xml.addnext(paragraph_xml)
+        paragraph = Paragraph(paragraph_xml, anchor._parent)  # noqa: SLF001
+        paragraph.add_run(after)
+
+
+def _replace_logo(document: DocumentObject, logo_path: Path) -> None:
+    for paragraph in _all_paragraphs(document):
+        text = _paragraph_text(paragraph)
+        if FDS_LOGO_TOKEN not in text:
+            continue
+        before, after = text.split(FDS_LOGO_TOKEN, 1)
+        _set_paragraph_text(paragraph, before)
+        paragraph.add_run().add_picture(str(logo_path), height=Cm(0.82))
+        if after:
+            paragraph.add_run(after)
+
+
+def _replace_text(document: DocumentObject, mapping: dict[str, str]) -> None:
+    for paragraph in _all_paragraphs(document):
+        original = _paragraph_text(paragraph)
+        rendered = original
+        for token, value in mapping.items():
+            rendered = rendered.replace(token, value)
+        if rendered != original:
+            _set_paragraph_text(paragraph, rendered)
+
+
+def _all_paragraphs(document: DocumentObject) -> Iterator[Paragraph]:
+    yield from document.paragraphs
+    for table in document.tables:
+        yield from _table_paragraphs(table)
+    for section in document.sections:
+        for part in (section.header, section.footer):
+            yield from part.paragraphs
+            for table in part.tables:
+                yield from _table_paragraphs(table)
+
+
+def _table_paragraphs(table: Table) -> Iterator[Paragraph]:
+    for row in table.rows:
+        for cell in row.cells:
+            yield from cell.paragraphs
+            for nested in cell.tables:
+                yield from _table_paragraphs(nested)
+
+
+def _paragraph_text(paragraph: Paragraph) -> str:
+    return "".join(run.text for run in paragraph.runs) if paragraph.runs else paragraph.text
+
+
+def _set_paragraph_text(paragraph: Paragraph, text: str) -> None:
+    if paragraph.runs:
+        for run in paragraph.runs:
+            run.text = ""
+        paragraph.runs[0].text = text
+    else:
+        paragraph.add_run(text)
+
+
+def _available_output_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    index = 2
+    while True:
+        candidate = path.with_stem(f"{path.stem}_{index}")
+        if not candidate.exists():
+            return candidate
+        index += 1

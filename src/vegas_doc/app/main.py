@@ -41,7 +41,7 @@ def main() -> int:
     app = get_or_create_application()
     context = build_application_context()
     app.setApplicationName(context.settings.app_name)
-    app.setOrganizationName("Vegas Inc.")
+    app.setOrganizationName(context.settings.organization_name)
     icon_path = context.services.resolve(ResourceManager).branding_path("app.ico")
     if icon_path is not None:
         from PySide6.QtGui import QIcon

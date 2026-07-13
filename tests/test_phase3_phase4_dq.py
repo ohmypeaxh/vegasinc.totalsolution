@@ -6,6 +6,7 @@ import base64
 import hashlib
 from pathlib import Path
 
+import pytest
 from docx import Document
 from docx.shared import Cm
 
@@ -15,6 +16,7 @@ from vegas_doc.models.urs import URSRequirement
 from vegas_doc.services.document_extraction import _range_page_numbers
 from vegas_doc.services.docx_generator import DQDocxGenerator, REQUIRED_DQ_PLACEHOLDERS
 from vegas_doc.services.dq_processing import DefaultURSParser, section_in_range
+from vegas_doc.services.word_template import InvalidTemplateFormatError
 
 
 _PNG_1X1 = base64.b64decode(
@@ -102,6 +104,37 @@ def test_template_validation_lists_every_missing_placeholder(tmp_path: Path) -> 
     Document().save(template)
 
     assert DQDocxGenerator().missing_placeholders(template) == REQUIRED_DQ_PLACEHOLDERS
+
+
+def test_renamed_legacy_doc_is_rejected_with_conversion_guidance(tmp_path: Path) -> None:
+    """A Word 97-2003 file renamed to DOCX explains the required conversion."""
+
+    template = tmp_path / "legacy-template.docx"
+    template.write_bytes(bytes.fromhex("D0CF11E0A1B11AE1") + bytes(64))
+
+    with pytest.raises(InvalidTemplateFormatError, match="Word 97-2003"):
+        DQDocxGenerator().missing_placeholders(template)
+
+
+def test_dq_widget_reports_legacy_template_without_crashing(tmp_path: Path, qapp, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Template preflight converts the format exception into a user warning."""
+
+    from PySide6.QtWidgets import QMessageBox
+
+    from vegas_doc.builtin_plugins.dq_generator import DQGeneratorWidget
+    from vegas_doc.config.defaults import AppSettings
+    from vegas_doc.core.application_context import build_application_context
+
+    template = tmp_path / "legacy-template.docx"
+    template.write_bytes(bytes.fromhex("D0CF11E0A1B11AE1") + bytes(64))
+    widget = DQGeneratorWidget(build_application_context(AppSettings(), data_dir=tmp_path / "data"))
+    widget.template_path.setText(str(template))
+    warnings: list[str] = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(str(args[2])))
+
+    widget.generate_docx()
+
+    assert warnings and "Word 97-2003" in warnings[-1]
 
 
 def test_hierarchical_range_parser_and_page_selection(tmp_path: Path) -> None:

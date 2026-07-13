@@ -15,10 +15,11 @@ _ERROR_ALREADY_EXISTS = 183
 class SingleInstanceGuard:
     """Own a Windows mutex or Qt lock file for one running process."""
 
-    def __init__(self, data_directory: Path) -> None:
+    def __init__(self, data_directory: Path, mutex_name: str = WINDOWS_MUTEX_NAME) -> None:
         data_directory.mkdir(parents=True, exist_ok=True)
         self._lock = QLockFile(str(data_directory / "VegasTotalSolutionDoc.lock"))
         self._lock.setStaleLockTime(30_000)
+        self._mutex_name = mutex_name
         self._acquired = False
         self._mutex_handle: int | None = None
         self._kernel32 = None
@@ -36,7 +37,7 @@ class SingleInstanceGuard:
             self._kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
             self._kernel32.CloseHandle.restype = ctypes.c_bool
             ctypes.set_last_error(0)
-            handle = create_mutex(None, False, WINDOWS_MUTEX_NAME)
+            handle = create_mutex(None, False, self._mutex_name)
             if not handle:
                 return False
             if ctypes.get_last_error() == _ERROR_ALREADY_EXISTS:

@@ -18,6 +18,7 @@ from docx.text.paragraph import Paragraph
 
 from vegas_doc.models.dq_mapping import DQMapping
 from vegas_doc.models.urs import URSRequirement
+from vegas_doc.services.word_template import InvalidTemplateFormatError, open_template_document
 
 LOGO_TOKEN = "##로고##"
 OCR_SECTION_TOKEN = "##OCR요구사항##"
@@ -98,7 +99,7 @@ class DQDocxGenerator:
 
         if not template_path.is_file():
             return tuple(required)
-        document = Document(template_path)
+        document = open_template_document(template_path)
         searchable = "\n".join(_paragraph_text(paragraph) for paragraph in _all_paragraphs(document))
         return tuple(token for token in required if token not in searchable)
 
@@ -136,7 +137,7 @@ class DQDocxGenerator:
         temp_dir = Path(tempfile.mkdtemp(prefix="vegas_dq_docx_", dir=output_path.parent))
         temp_output = temp_dir / output_path.name
         try:
-            document = Document(source_template)
+            document = open_template_document(source_template)
             replacements = _context_replacements(context)
             _replace_everywhere(document, replacements)
             if logo_path is not None:

@@ -70,13 +70,16 @@ def test_application_icon_contains_required_resolutions() -> None:
 
 def test_resource_manager_resolves_source_branding() -> None:
     icon = ResourceManager.for_package().branding_path("app.ico")
+    wordmark = ResourceManager.for_package().branding_path("vegas_logo.png")
 
     assert icon is not None and icon.resolve() == (ROOT / "assets" / "app.ico").resolve()
+    assert wordmark is not None and wordmark.resolve() == (ROOT / "assets" / "vegas_logo.png").resolve()
 
 
 def test_single_instance_guard_rejects_second_owner(tmp_path: Path, qapp) -> None:  # type: ignore[no-untyped-def]
-    first = SingleInstanceGuard(tmp_path)
-    second = SingleInstanceGuard(tmp_path)
+    test_mutex = f"VegasTotalSolutionDoc.Test.{tmp_path.name}"
+    first = SingleInstanceGuard(tmp_path, mutex_name=test_mutex)
+    second = SingleInstanceGuard(tmp_path, mutex_name=test_mutex)
     try:
         assert first.acquire()
         assert not second.acquire(timeout_ms=0)
@@ -98,4 +101,5 @@ def test_installer_and_workflow_static_release_contract() -> None:
     assert "100 MB" in workflow and "160 MB" in workflow
     assert not any(ord(character) < 9 for character in workflow)
     assert 'icon="assets/app.ico"' in spec
+    assert '"assets/vegas_logo.png"' in spec
     assert 'version="build/version_info.txt"' in spec

@@ -5,6 +5,7 @@ Vegas Inc.의 Windows용 사내 문서 자동화 플랫폼입니다. 현재 DQ G
 ## 주요 구성
 
 - PySide6 플러그인 기반 데스크톱 UI
+- Vegas 공식 로고와 브랜드 테마를 적용한 `Manual / DQ / F&DS / Settings` 작업 공간
 - 숫자 계층을 인식하는 URS 범위 추출 (`6.9 < 6.10`, 하위 항목 포함)
 - 검색 가능한 PDF 텍스트 우선 사용 및 페이지별 OCR 실패 격리
 - 요구사항 추가·삭제·편집·순서 변경·제외·OCR 재실행
@@ -38,6 +39,34 @@ scripts\test.bat
 
 Secret Key는 프로젝트, 설정 JSON, 로그, 생성 문서에 기록하지 않습니다. 입력 템플릿은 직접 수정하지 않고 임시 복사본에서 처리한 뒤 결과를 원자적으로 저장합니다.
 
+> 확장자만 `.docx`로 바꾼 구형 Word 97-2003 (`.doc`) 파일은 템플릿으로 사용할 수 없습니다. Microsoft Word에서 **다른 이름으로 저장 → Word 문서 (*.docx)** 로 실제 변환한 뒤 선택해 주세요. 앱은 이 형식을 사전에 감지하고 변환 방법을 안내합니다.
+
+## Manual Generator
+
+기존 **Manual Maker v9**의 기능을 PySide6 플러그인으로 통합했습니다. 별도 Tkinter 실행 프로그램 없이 다음 기능을 동일한 앱에서 사용할 수 있습니다.
+
+- Weighing Booth, Clean Booth, Sampling Booth, ORABS 장비 선택과 `GR-OM-*` 문서번호 자동 구성
+- Main Screen, Data Setting, Alarm Screen 및 선택적 Alarm Setting 이미지 삽입
+- Emergency Stop, Fan/Blower 수량 및 온도·습도·차압·풍속 High/Low 알람 표 생성
+- `[##장비명##]`, `[##문서번호##]`, `[##작성일##]`, `[##제품선택##]`, `[##사진1##]`~`[##사진4##]`, `[##알람리스트##]` 자리표시자 처리
+- 파일/폴더 찾아보기와 드래그앤드롭, 생성 완료 후 Word 파일 열기
+
+## F&DS Generator
+
+1. `F&DS Generator` 탭에서 URS PDF를 드래그앤드롭하고 시작·종료 요구사항 번호를 입력합니다.
+2. `선택 범위 URS 분석`을 실행하면 검색 가능한 PDF 텍스트를 우선 사용하고 필요한 페이지만 Settings의 CLOVA OCR 연결로 읽습니다.
+3. 변환된 문장을 표에서 검토·수정합니다. `F&DS Rules` 탭에서는 `URS 원문 끝 표현 → F&DS 변환 끝 표현` 규칙을 추가·수정·삭제하고 사용자 설정에 저장할 수 있습니다.
+4. `##장비명##`, `##문서번호##`, `##로고##`, `##작성일##`, `##F&DS내용##`이 들어 있는 DOCX 템플릿과 저장 폴더를 선택합니다.
+5. `F&DS 문서 생성`을 누르면 `##F&DS내용##` 위치에 `5.2.1.`부터 맑은 고딕 10pt로 순서대로 삽입됩니다.
+
+## 브랜드 에셋
+
+`assets\vegas_logo.png`는 Vegas 공식 원본 로고이며, `assets\app.png`와 `assets\app.ico`는 이 로고로 만든 앱/설치 프로그램 아이콘입니다. 원본 로고가 갱신되면 Pillow를 사용할 수 있는 개발 환경에서 다음 명령으로 아이콘을 다시 만들 수 있습니다.
+
+```bat
+python scripts\generate_brand_assets.py "경로\vegas_logo_new.png" --output assets
+```
+
 ## Windows 설치 프로그램 빌드
 
 Python 3.12와 Inno Setup 6이 설치된 Windows에서:
@@ -68,7 +97,7 @@ GitHub에서 **Actions → Generate UI Previews → Run workflow**를 실행한 
 scripts\preview_ui.bat
 ```
 
-실제 PySide6 위젯으로 만든 9개 PNG가 `artifacts\ui-previews\`에 생성됩니다. 샘플 데이터와 마스킹된 자격증명만 사용합니다.
+실제 PySide6 위젯으로 만든 11개 PNG가 `artifacts\ui-previews\`에 생성됩니다. F&DS Generator와 F&DS Rules 탭을 포함하며, 샘플 데이터와 마스킹된 자격증명만 사용합니다.
 
 ## 데이터 위치와 보안
 
