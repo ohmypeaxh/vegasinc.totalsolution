@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import fitz
+
 from vegas_doc.models.extraction import DocumentExtractionResult, DocumentKind, ExtractionMethod, ExtractionPolicy, PageExtractionMetadata
 from vegas_doc.models.ocr import OCRConfigurationState, OCRConfigurationStatus, OCRPageRequest, OCRPageResult, OCRRequest
 from vegas_doc.services.extraction import ExtractionPolicyEvaluator
-from vegas_doc.services.document_extraction import extraction_failure_message
+from vegas_doc.services.document_extraction import _render_page_png, extraction_failure_message
 from vegas_doc.services.ocr import OCRProvider, ProviderOCRService
 
 
@@ -90,3 +92,12 @@ def test_missing_clova_secret_becomes_actionable_extraction_error(tmp_path: Path
     assert message is not None
     assert "Secret Key" in message
     assert "Settings" in message
+
+
+def test_scanned_pdf_page_is_rendered_at_high_resolution_for_small_table_numbers() -> None:
+    document = fitz.open()
+    page = document.new_page(width=100, height=200)
+
+    rendered = fitz.Pixmap(_render_page_png(page))
+
+    assert (rendered.width, rendered.height) == (300, 600)

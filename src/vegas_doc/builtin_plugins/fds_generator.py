@@ -47,6 +47,7 @@ from vegas_doc.services.fds_generator import (
 )
 from vegas_doc.services.ocr import ProviderOCRService
 from vegas_doc.services.secrets import KeyringSecretStore
+from vegas_doc.ui.document_review_warning import confirm_ocr_document_review
 from vegas_doc.ui.widgets.file_path_input import FilePathInput
 from vegas_doc.utils.date_format import QT_DOCUMENT_DATE_FORMAT
 
@@ -472,6 +473,9 @@ class FDSGeneratorWidget(QWidget):
         errors = request.validation_errors()
         if errors:
             QMessageBox.warning(self, "생성 전 확인", "\n".join(dict.fromkeys(errors)))
+            return
+        if not confirm_ocr_document_review(self):
+            self.status.setText("문서 검토 경고에서 생성을 취소했습니다.")
             return
         self.status.setText("F&DS Word 문서를 생성하고 있습니다...")
         try:

@@ -16,7 +16,8 @@ class NumberedTextBlock:
     text: str
 
 
-_HIERARCHICAL_NUMBER = r"\d+(?:\s*\.\s*\d+)*"
+_OCR_DIGIT_RUN = r"[0-9OoIl|ZzSsBbTt]+"
+_HIERARCHICAL_NUMBER = rf"\d+(?:\s*[.,:·]\s*{_OCR_DIGIT_RUN})*"
 _NUMBER_ONLY = re.compile(rf"^\s*(?P<number>{_HIERARCHICAL_NUMBER})\s*(?:[.)])?\s*$")
 _NUMBER_WITH_TEXT = re.compile(
     rf"^\s*(?P<number>{_HIERARCHICAL_NUMBER})\s*(?P<suffix>[.)]?)(?:\s+|\s*[|:\-]\s*)(?P<text>\S.*)$"
@@ -92,7 +93,27 @@ def _parse_numbered_line(line: str) -> tuple[str, str, bool] | None:
 
 
 def _normalize_number(value: str) -> str:
-    return re.sub(r"\s+", "", value)
+    translation = str.maketrans(
+        {
+            "O": "0",
+            "o": "0",
+            "I": "1",
+            "l": "1",
+            "|": "1",
+            "Z": "2",
+            "z": "2",
+            "S": "5",
+            "s": "5",
+            "B": "8",
+            "b": "8",
+            "T": "7",
+            "t": "7",
+            ",": ".",
+            ":": ".",
+            "·": ".",
+        }
+    )
+    return re.sub(r"\s+", "", value).translate(translation)
 
 
 def _is_noise(line: str) -> bool:

@@ -26,6 +26,7 @@ from vegas_doc.services.ocr import ProviderOCRService
 from vegas_doc.services.project_persistence import DQProjectRepository
 from vegas_doc.services.secrets import KeyringSecretStore
 from vegas_doc.services.word_template import InvalidTemplateFormatError
+from vegas_doc.ui.document_review_warning import confirm_ocr_document_review
 from vegas_doc.ui.widgets.file_path_input import FilePathInput
 from vegas_doc.utils.date_format import QT_DOCUMENT_DATE_FORMAT, format_document_date
 
@@ -300,6 +301,8 @@ class DQGeneratorWidget(QWidget):
 
         review_group = QGroupBox("D. OCR 결과 미리보기")
         review_layout = QVBoxLayout(review_group)
+        review_layout.setContentsMargins(16, 24, 16, 20)
+        review_layout.setSpacing(14)
         self.page_review = QTextEdit()
         self.page_review.setPlaceholderText("PDF/OCR 원문 검토 및 수정 영역")
         self.page_review.setMinimumHeight(320)
@@ -308,12 +311,15 @@ class DQGeneratorWidget(QWidget):
         self.table.setModel(self.model)
         self.table.setSortingEnabled(False)
         self.table.setMinimumHeight(480)
-        review_group.setMinimumHeight(900)
+        review_group.setMinimumHeight(970)
         review_layout.addWidget(self.page_review)
         review_layout.addWidget(self.table)
         review_layout.setStretch(0, 2)
         review_layout.setStretch(1, 3)
-        review_actions = QHBoxLayout()
+        self.review_actions_bar = QWidget()
+        review_actions = QHBoxLayout(self.review_actions_bar)
+        review_actions.setContentsMargins(0, 10, 0, 0)
+        review_actions.setSpacing(8)
         for text, slot in (
             ("행 추가", self.add_review_row),
             ("행 삭제", self.delete_review_row),
@@ -325,7 +331,7 @@ class DQGeneratorWidget(QWidget):
             button.clicked.connect(slot)
             review_actions.addWidget(button)
         review_actions.addStretch()
-        review_layout.addLayout(review_actions)
+        review_layout.addWidget(self.review_actions_bar)
         content_layout.addWidget(review_group)
 
         output_group = QGroupBox("E. 출력 설정")
@@ -566,6 +572,9 @@ class DQGeneratorWidget(QWidget):
         output = self._resolve_output_conflict(output)
         if output is None:
             self.status.setText("문서 생성을 취소했습니다.")
+            return
+        if not confirm_ocr_document_review(self):
+            self.status.setText("문서 검토 경고에서 생성을 취소했습니다.")
             return
         context = {
             "project_name": data.equipment_name,

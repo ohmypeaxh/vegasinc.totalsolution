@@ -143,8 +143,6 @@ class FDSURSParser:
                 looks_like_requirement = bool(_REQUIREMENT_LANGUAGE.search(content))
                 if len(section_key(number)) <= heading_depth and not looks_like_requirement:
                     continue
-                if not looks_like_requirement and len(content) < 10:
-                    continue
                 results.append(FDSStatement(number, page.page_number, content, content))
         return tuple(results)
 

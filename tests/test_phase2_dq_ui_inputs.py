@@ -79,6 +79,7 @@ def test_real_dq_widget_contains_phase2_inputs(tmp_path: Path) -> None:
     assert widget.author_date.displayFormat() == "yyyy.MM.dd"
     assert widget.page_review.minimumHeight() >= 320
     assert widget.table.minimumHeight() >= 480
+    assert widget.review_actions_bar.layout().contentsMargins().top() >= 10
     widget.version_number.setText("03")
     widget.reset_inputs()
     assert widget.version_number.text() == "00"

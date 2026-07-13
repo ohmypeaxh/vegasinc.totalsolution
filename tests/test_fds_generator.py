@@ -128,6 +128,46 @@ def test_fds_parser_keeps_generic_endings_before_parentheses_and_mid_text(tmp_pa
     assert [item.requirement_id for item in statements] == ["7.1", "7.2"]
 
 
+def test_passbox_range_recovers_all_41_rows_with_ocr_number_confusions(tmp_path: Path) -> None:
+    source = tmp_path / "passbox-urs.pdf"
+    confused_numbers = {
+        "7.1": "7.I",
+        "7.8": "7,B",
+        "7.10": "7,1O",
+        "7.15": "7.I5",
+        "7.22": "7.ZZ",
+        "7.30": "7.3O",
+        "7.37": "7.3T",
+    }
+    lines = ["7. 설계 요구사항"]
+    for index in range(1, 38):
+        number = f"7.{index}"
+        recognized = confused_numbers.get(number, number)
+        content = "1대" if index == 2 else f"설계 요구사항 {index}을 적용해야 한다."
+        lines.append(f"{recognized} {content}")
+    lines.append("8. 기능 요구사항")
+    lines.extend(f"8.{index} 기능 요구사항 {index}을 적용해야 한다." for index in range(1, 5))
+    page = PageExtractionMetadata(
+        source,
+        9,
+        DocumentKind.SCANNED_PDF,
+        ExtractionMethod.OCR,
+        "\n".join(lines),
+    )
+
+    statements = FDSURSParser().parse(
+        DocumentExtractionResult(source, DocumentKind.SCANNED_PDF, (page,)),
+        "7",
+        "8",
+    )
+
+    assert len(statements) == 41
+    assert [item.requirement_id for item in statements] == [
+        *(f"7.{index}" for index in range(1, 38)),
+        *(f"8.{index}" for index in range(1, 5)),
+    ]
+
+
 def test_fds_word_generator_numbers_content_and_formats_malgun_gothic(tmp_path: Path) -> None:
     template = tmp_path / "fds-template.docx"
     logo = tmp_path / "logo.png"

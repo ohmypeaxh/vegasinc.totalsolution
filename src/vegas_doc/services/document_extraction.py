@@ -14,6 +14,7 @@ from vegas_doc.services.ocr import OCRService
 
 SUPPORTED_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff"}
 MEANINGFUL_TEXT_LENGTH = 30
+OCR_RENDER_SCALE = 3
 
 
 class PyMuPDFDocumentTextExtractor(DocumentTextExtractor):
@@ -95,7 +96,7 @@ class PyMuPDFDocumentTextExtractor(DocumentTextExtractor):
 
 
 def _render_page_png(page: fitz.Page) -> bytes:
-    pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+    pixmap = page.get_pixmap(matrix=fitz.Matrix(OCR_RENDER_SCALE, OCR_RENDER_SCALE), alpha=False)
     return pixmap.tobytes("png")
 
 
