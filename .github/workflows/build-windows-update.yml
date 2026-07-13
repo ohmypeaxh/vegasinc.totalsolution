@@ -2,11 +2,12 @@ name: Build Lightweight Windows Update
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
   push:
     branches:
       - main
       - "release/**"
-      - "codex/**"
     paths:
       - ".github/workflows/build-windows-update.yml"
       - "assets/**"
