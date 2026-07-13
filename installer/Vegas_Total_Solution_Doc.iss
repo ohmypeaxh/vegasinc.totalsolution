@@ -41,6 +41,14 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Files]
 Source: "..\dist\Vegas_Total_Solution_Doc\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+; Remove runtime files from older full installations before copying the new build.
+; User settings, credentials, projects, and generated documents live outside {app}.
+[InstallDelete]
+Type: files; Name: "{app}\{#MyAppExeName}"
+Type: filesandordirs; Name: "{app}\_internal"
+Type: filesandordirs; Name: "{app}\plugins"
+Type: filesandordirs; Name: "{app}\src"
+
 [Tasks]
 Name: "desktopicon"; Description: "바탕화면에 바로가기를 만드시겠습니까?"; GroupDescription: "추가 아이콘:"; Flags: unchecked
 

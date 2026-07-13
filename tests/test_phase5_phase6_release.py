@@ -96,6 +96,9 @@ def test_installer_and_workflow_static_release_contract() -> None:
     assert "DefaultDirName={autopf}\\Vegas Inc\\Vegas Total Solution Doc" in installer
     assert "SetupIconFile=..\\assets\\app.ico" in installer
     assert "desktopicon" in installer and "CloseApplications=yes" in installer
+    assert "[InstallDelete]" in installer
+    assert 'Type: filesandordirs; Name: "{app}\\_internal"' in installer
+    assert 'Type: filesandordirs; Name: "{app}\\plugins"' in installer
     assert "Vegas-Total-Solution-Doc-Installer" in workflow
     assert "Vegas_Total_Solution_Doc_Setup.exe" in workflow
     assert "100 MB" in workflow and "160 MB" in workflow
