@@ -6,6 +6,9 @@ from pathlib import Path
 
 import fitz
 import pytest
+from PySide6.QtGui import QPageSize
+from PySide6.QtPrintSupport import QPrinter
+from PySide6.QtWidgets import QDialog, QLabel
 
 from vegas_doc.models.cover_document import (
     LOGO_PLACEHOLDERS,
@@ -14,6 +17,7 @@ from vegas_doc.models.cover_document import (
     CoverDocumentRequest,
 )
 from vegas_doc.services.cover_generator import LOGO_PLACEMENTS, CoverPdfGenerator
+from vegas_doc.services.cover_printer import CoverPdfPrinter
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -90,8 +94,8 @@ def test_cover_logo_placements_match_requested_dimensions() -> None:
         ("height", 2.11),
         ("width", 1.38),
         ("width", 2.4),
-        ("width", 2.4),
-        ("width", 2.4),
+        ("width", 3.58),
+        ("width", 3.58),
     ]
 
 
@@ -159,8 +163,105 @@ def test_cover_widget_exposes_requested_inputs_and_drag_drop(tmp_path: Path, qap
     assert widget.qualification_english.text() == "Cycle Validation"
     assert widget.report_number.text() == "VR-CV-PB-001"
     assert widget.filename_preview.text() == "Pass Box_CV_cover.pdf"
+    assert widget.print_button.text() == "Print"
+    assert not any("cm" in label.text().lower() for label in widget.findChildren(QLabel))
     assert widget.template_input.acceptDrops()
     assert widget.logo_input.acceptDrops()
+
+
+def test_cover_print_does_not_require_a_pdf_output_directory(tmp_path: Path, qapp, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from vegas_doc.builtin_plugins.cover_generator import CoverGeneratorWidget
+    from vegas_doc.config.defaults import AppSettings
+    from vegas_doc.core.application_context import build_application_context
+
+    request = _request(tmp_path)
+    widget = CoverGeneratorWidget(build_application_context(AppSettings(), data_dir=tmp_path / "data"))
+    widget.template_input.set_path(request.template_path)
+    widget.logo_input.set_path(request.customer_logo_path)
+    widget.equipment_name.setText(request.equipment_name)
+    widget.qualification.setCurrentText(request.qualification_abbreviation)
+    widget.plan_number.setText(request.plan_number)
+    widget.report_number.setText(request.report_number)
+    widget.applicable_year.setText(request.applicable_year)
+    observed: dict[str, object] = {}
+
+    def start_generation(print_request: CoverDocumentRequest, operation: str) -> None:
+        observed["request"] = print_request
+        observed["operation"] = operation
+        observed["temporary_directory_exists"] = print_request.output_directory.is_dir()
+
+    monkeypatch.setattr(widget, "_start_generation", start_generation)
+    widget.print_cover()
+
+    assert observed["operation"] == "print"
+    assert observed["temporary_directory_exists"] is True
+    print_request = observed["request"]
+    assert isinstance(print_request, CoverDocumentRequest)
+    assert print_request.output_directory != request.output_directory
+    widget._cleanup_print_directory()
+    assert not print_request.output_directory.exists()
+
+
+class _PrintDialogResult:
+    def __init__(self, result: QDialog.DialogCode) -> None:
+        self.result = result
+        self.title = ""
+        self.page_range = (0, 0)
+
+    def setWindowTitle(self, title: str) -> None:  # noqa: N802 - mirrors Qt API.
+        self.title = title
+
+    def setMinMax(self, minimum: int, maximum: int) -> None:  # noqa: N802 - mirrors Qt API.
+        self.page_range = (minimum, maximum)
+
+    def exec(self) -> int:
+        return self.result
+
+
+def test_cover_printer_renders_two_pages_after_print_dialog_confirmation(tmp_path: Path, qapp) -> None:  # type: ignore[no-untyped-def]
+    source = tmp_path / "cover.pdf"
+    output = tmp_path / "printed.pdf"
+    document = fitz.open()
+    document.new_page(width=595, height=842).insert_text((72, 72), "Cover page")
+    document.new_page(width=595, height=842).insert_text((72, 72), "Label page")
+    document.save(source)
+    document.close()
+    printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+    printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+    printer.setOutputFileName(str(output))
+    printer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
+    dialog = _PrintDialogResult(QDialog.DialogCode.Accepted)
+    service = CoverPdfPrinter(
+        printer_factory=lambda: printer,
+        dialog_factory=lambda _printer, _parent: dialog,
+        render_dpi=96,
+    )
+
+    assert service.print_pdf(source)
+    assert dialog.title == "Cover 인쇄"
+    assert dialog.page_range == (1, 2)
+    with fitz.open(output) as printed:
+        assert printed.page_count == 2
+
+
+def test_cover_printer_cancel_does_not_create_output(tmp_path: Path, qapp) -> None:  # type: ignore[no-untyped-def]
+    source = tmp_path / "cover.pdf"
+    output = tmp_path / "printed.pdf"
+    document = fitz.open()
+    document.new_page()
+    document.save(source)
+    document.close()
+    printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+    printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+    printer.setOutputFileName(str(output))
+    dialog = _PrintDialogResult(QDialog.DialogCode.Rejected)
+    service = CoverPdfPrinter(
+        printer_factory=lambda: printer,
+        dialog_factory=lambda _printer, _parent: dialog,
+    )
+
+    assert not service.print_pdf(source)
+    assert not output.exists()
 
 
 def test_excel_renderer_script_preserves_template_and_exports_two_sheets() -> None:

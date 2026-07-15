@@ -35,8 +35,8 @@ LOGO_PLACEMENTS = (
     LogoPlacement("##고객사로고1##", "height", 2.11),
     LogoPlacement("##고객사로고2##", "width", 1.38),
     LogoPlacement("##고객사로고3##", "width", 2.4),
-    LogoPlacement("##고객사로고4##", "width", 2.4),
-    LogoPlacement("##고객사로고5##", "width", 2.4),
+    LogoPlacement("##고객사로고4##", "width", 3.58),
+    LogoPlacement("##고객사로고5##", "width", 3.58),
 )
 
 

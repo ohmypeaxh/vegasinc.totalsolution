@@ -67,7 +67,7 @@ class CoverDocumentRequest:
         equipment = re.sub(r'[\\/:*?"<>|]+', "_", self.equipment_name.strip())
         return f"{equipment}_{self.qualification_abbreviation}_cover.pdf"
 
-    def validation_errors(self) -> tuple[str, ...]:
+    def validation_errors(self, *, require_output_directory: bool = True) -> tuple[str, ...]:
         """Return actionable validation errors without mutating the request."""
 
         errors: list[str] = []
@@ -88,7 +88,7 @@ class CoverDocumentRequest:
             errors.append("유효한 Excel XLSX 템플릿을 선택해 주세요.")
         if self.customer_logo_path.suffix.lower() not in _IMAGE_EXTENSIONS or not self.customer_logo_path.is_file():
             errors.append("유효한 고객사 로고 이미지를 선택해 주세요.")
-        if not self.output_directory.is_dir():
+        if require_output_directory and not self.output_directory.is_dir():
             errors.append("유효한 PDF 저장 폴더를 선택해 주세요.")
         return tuple(errors)
 

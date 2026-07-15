@@ -273,6 +273,11 @@ def generate_previews() -> None:
         cover_widget.logo_input.set_path(Path("sample-data") / "customer_demo_logo.png")
         cover_widget.output_directory.set_path(Path("output"))
         cover_widget.status.setText("미리보기용 표지 정보입니다. 실제 고객 정보는 포함되지 않습니다.")
+        cover_scroll = cover_widget.findChild(QScrollArea, "CoverWorkspaceScroll")
+        if cover_scroll is None:
+            raise RuntimeError("Cover workspace scroll area was not found")
+        _scroll_to_widget(cover_scroll, cover_widget.generate_button)
+        _process_events(app)
         _save_widget(window, "13_cover_generator.png", app)
 
         onboarding = OnboardingWizard(window)
@@ -284,7 +289,7 @@ def generate_previews() -> None:
         _save_widget(onboarding, "08_first_run_onboarding.png", app)
         onboarding.close()
 
-        about = AboutDialog("0.1.4", window)
+        about = AboutDialog("0.1.5", window)
         about.resize(640, 360)
         about.show()
         _save_widget(about, "09_about_dialog.png", app)

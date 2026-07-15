@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 from datetime import date
 
-__version__ = "0.1.4"
+__version__ = "0.1.5"
 
 
 @dataclass(frozen=True, slots=True)

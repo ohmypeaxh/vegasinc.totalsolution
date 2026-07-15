@@ -1,6 +1,6 @@
 #define MyAppName "Vegas Total Solution Doc"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.4"
+  #define MyAppVersion "0.1.5"
 #endif
 #define MyAppPublisher "Vegas Inc."
 #define MyAppExeName "Vegas_Total_Solution_Doc.exe"
@@ -43,6 +43,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Files]
 Source: "..\dist\Vegas_Total_Solution_Doc\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\Vegas_Total_Solution_Doc\_internal\vegas_doc\resources\*"; DestDir: "{app}\_internal\vegas_doc\resources"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist\Vegas_Total_Solution_Doc\_internal\PySide6\QtPrintSupport.pyd"; DestDir: "{app}\_internal\PySide6"; Flags: ignoreversion
+Source: "..\dist\Vegas_Total_Solution_Doc\_internal\PySide6\Qt6PrintSupport.dll"; DestDir: "{app}\_internal\PySide6"; Flags: ignoreversion
 
 [InstallDelete]
 Type: files; Name: "{app}\{#MyAppExeName}"

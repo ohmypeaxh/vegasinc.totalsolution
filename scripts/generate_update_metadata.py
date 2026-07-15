@@ -45,6 +45,11 @@ def _git_commit(root: Path) -> str:
 def _payload_files(root: Path) -> list[dict[str, object]]:
     distribution = root / "dist" / "Vegas_Total_Solution_Doc"
     candidates = [distribution / "Vegas_Total_Solution_Doc.exe"]
+    pyside_directory = distribution / "_internal" / "PySide6"
+    candidates.extend(
+        pyside_directory / filename
+        for filename in ("QtPrintSupport.pyd", "Qt6PrintSupport.dll")
+    )
     resources = distribution / "_internal" / "vegas_doc" / "resources"
     if resources.is_dir():
         candidates.extend(path for path in resources.rglob("*") if path.is_file())
