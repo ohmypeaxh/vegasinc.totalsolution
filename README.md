@@ -5,7 +5,7 @@ Vegas Inc.의 Windows용 사내 문서 자동화 플랫폼입니다. 현재 DQ G
 ## 주요 구성
 
 - PySide6 플러그인 기반 데스크톱 UI
-- Vegas 공식 로고와 브랜드 테마를 적용한 `Manual / DQ / F&DS / Raw Data / Settings` 작업 공간
+- Vegas 공식 로고와 브랜드 테마를 적용한 `Manual / DQ / F&DS / Raw Data / Cover / Settings` 작업 공간
 - 숫자 계층을 인식하는 URS 범위 추출 (`6.9 < 6.10`, 하위 항목 포함)
 - 검색 가능한 PDF 텍스트 우선 사용 및 페이지별 OCR 실패 격리
 - 작은 표 번호를 위한 고해상도 OCR 렌더링과 `7.I`, `7,10` 같은 숫자 오인식 보정
@@ -70,6 +70,16 @@ Secret Key는 프로젝트, 설정 JSON, 로그, 생성 문서에 기록하지 �
 - 사진형은 `##검증명##`과 사진 삽입 위치 `##사진##`을 사용합니다. 여러 사진을 드래그앤드롭한 뒤 버튼이나 목록 드래그로 순서를 변경할 수 있습니다.
 - 모든 첨부사진은 높이 9.88cm, 원본 가로세로 비율 유지로 삽입되며 두 장마다 다음 페이지로 넘어갑니다. `comment` 형식은 확장자를 뺀 파일명을 Arial 10pt로 먼저 쓰고, `non-comment` 형식은 빈 줄만 둡니다.
 
+## Cover Generator
+
+1. `개별표지`, `개별라벨` 시트와 11개 자리표시자가 있는 XLSX 템플릿을 선택합니다.
+2. 영문 장비명, 적격성평가축약, 계획서번호, 해당년도를 입력하고 고객사 로고를 드래그앤드롭합니다.
+3. 적격성평가축약 선택에 따라 한글·영문 명칭이 자동으로 치환됩니다.
+4. 고객사 로고는 `##고객사로고1##`~`##고객사로고5##` 위치에 원본 비율과 지정 크기를 유지해 가운데 정렬됩니다.
+5. 저장 폴더를 선택하고 `Cover PDF 생성`을 누르면 `장비명_적격성평가축약_cover.pdf` 이름의 정확히 2페이지 PDF가 생성됩니다.
+
+PDF 출력은 Windows에 설치된 Microsoft Excel을 사용하며 원본 XLSX 파일은 변경하지 않습니다. 각 시트의 인쇄영역이 한 페이지에 맞게 구성되어 있어야 합니다.
+
 ## 브랜드 에셋
 
 `assets\vegas_logo.png`는 프로그램 내부에 표시하는 Vegas 공식 워드마크입니다. `assets\app.png`와 `assets\app.ico`는 실행파일, 설치파일, 제거 프로그램, 시작 메뉴 및 바탕화면 바로가기에 공통으로 적용하는 전용 V-DOC 아이콘입니다. 워드마크만 갱신할 때는 기존 앱 아이콘을 유지하며, 앱 아이콘도 함께 갱신할 때만 `--app-icon`을 지정합니다.
@@ -103,7 +113,7 @@ GitHub Actions의 **Build Windows Installer** workflow도 같은 테스트·빌�
 
 전체 설치를 한 번 완료한 PC에서는 이후 `Vegas_Total_Solution_Doc_Update.exe`만 실행해 최신 메인 EXE와 리소스를 교체할 수 있습니다. 업데이트 패키지는 누적형이므로 최신 버전 하나만 설치하면 이전 소형 업데이트의 프로그램 코드 변경도 함께 적용됩니다.
 
-GitHub에서 **Actions → Build Lightweight Windows Update** 실행 결과를 열고 `Vegas-Total-Solution-Doc-Update-0.1.2` artifact를 내려받습니다. 기본 설치본이 없거나 Python·PySide6 같은 런타임 의존성이 바뀐 버전에는 전체 설치파일을 사용해야 합니다.
+GitHub에서 **Actions → Build Lightweight Windows Update** 실행 결과를 열고 `Vegas-Total-Solution-Doc-Update-0.1.3` artifact를 내려받습니다. 기본 설치본이 없거나 Python·PySide6 같은 런타임 의존성이 바뀐 버전에는 전체 설치파일을 사용해야 합니다.
 
 로컬 빌드:
 
@@ -124,7 +134,7 @@ GitHub에서 **Actions → Generate UI Previews → Run workflow**를 실행한 
 scripts\preview_ui.bat
 ```
 
-실제 PySide6 위젯으로 만든 12개 PNG가 `artifacts\ui-previews\`에 생성됩니다. F&DS Generator, F&DS Rules, Raw Data Generator 화면을 포함하며, 샘플 데이터와 마스킹된 자격증명만 사용합니다.
+실제 PySide6 위젯으로 만든 13개 PNG가 `artifacts\ui-previews\`에 생성됩니다. F&DS Generator, F&DS Rules, Raw Data Generator, Cover Generator 화면을 포함하며, 샘플 데이터와 마스킹된 자격증명만 사용합니다.
 
 ## 데이터 위치와 보안
 

@@ -10,6 +10,7 @@ datas = collect_data_files(
         "resources/templates/*.docx",
         "resources/themes/*.qss",
         "resources/docs/*.txt",
+        "resources/scripts/*.ps1",
     ],
 )
 datas += [

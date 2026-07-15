@@ -15,6 +15,7 @@ from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication, QLineEdit, QScrollArea, QWidget
 
 from vegas_doc.app.main import create_main_window, get_or_create_application
+from vegas_doc.builtin_plugins.cover_generator import CoverGeneratorWidget
 from vegas_doc.builtin_plugins.dq_generator import DQGeneratorWidget
 from vegas_doc.builtin_plugins.fds_generator import FDSGeneratorWidget
 from vegas_doc.builtin_plugins.raw_data_generator import RawDataGeneratorWidget
@@ -43,6 +44,7 @@ EXPECTED_SCREENSHOTS = (
     "10_fds_generator.png",
     "11_fds_rules.png",
     "12_raw_data_generator.png",
+    "13_cover_generator.png",
 )
 
 
@@ -259,6 +261,19 @@ def generate_previews() -> None:
         raw_data_widget.status.setText("미리보기용 사진 3장의 순서를 검토하고 있습니다.")
         _save_widget(window, "12_raw_data_generator.png", app)
 
+        cover_widget = _select_plugin(window, "cover", app)
+        if not isinstance(cover_widget, CoverGeneratorWidget):
+            raise TypeError("Cover plugin did not provide the production CoverGeneratorWidget")
+        cover_widget.equipment_name.setText("Pass Box")
+        cover_widget.qualification.setCurrentText("IQ")
+        cover_widget.plan_number.setText("VP-IQ-PB-001")
+        cover_widget.applicable_year.setText("2026")
+        cover_widget.template_input.set_path(Path("templates") / "demo_cover_template.xlsx")
+        cover_widget.logo_input.set_path(Path("sample-data") / "customer_demo_logo.png")
+        cover_widget.output_directory.set_path(Path("output"))
+        cover_widget.status.setText("미리보기용 표지 정보입니다. 실제 고객 정보는 포함되지 않습니다.")
+        _save_widget(window, "13_cover_generator.png", app)
+
         onboarding = OnboardingWizard(window)
         onboarding.template_path.setText(str(Path("templates") / "default_dq_template.docx"))
         onboarding.invoke_url.setText("https://example.invalid/clova-ocr")
@@ -268,7 +283,7 @@ def generate_previews() -> None:
         _save_widget(onboarding, "08_first_run_onboarding.png", app)
         onboarding.close()
 
-        about = AboutDialog("0.1.2", window)
+        about = AboutDialog("0.1.3", window)
         about.resize(640, 360)
         about.show()
         _save_widget(about, "09_about_dialog.png", app)

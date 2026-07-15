@@ -90,5 +90,6 @@ def test_builtin_plugins_load_in_navigation_order(tmp_path) -> None:  # type: ig
         "DQ Generator",
         "F&DS Generator",
         "Raw Data Generator",
+        "Cover Generator",
         "Settings",
     ]
