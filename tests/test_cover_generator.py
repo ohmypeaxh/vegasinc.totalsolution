@@ -52,6 +52,7 @@ def _request(tmp_path: Path, abbreviation: str = "IQ") -> CoverDocumentRequest:
         "Pass Box",
         abbreviation,
         "VP-IQ-PB-001",
+        "VR-IQ-PB-001",
         "2026",
     )
 
@@ -68,6 +69,7 @@ def test_cover_request_replaces_all_text_placeholders_and_builds_filename(tmp_pa
         "##적격성평가한글##": "설치 및 운전적격성평가",
         "##적격성평가영문##": "Installation & Operational Qualification",
         "##계획서번호##": "VP-IQ-PB-001",
+        "##보고서번호##": "VR-IQ-PB-001",
         "##해당년도##": "2026",
     }
     assert request.output_filename() == "Pass Box_IOQ_cover.pdf"
@@ -77,8 +79,8 @@ def test_cover_qualification_mapping_matches_all_requested_values() -> None:
     assert list(QUALIFICATION_TITLES) == ["URS", "F&DS", "DQ", "FAT", "SAT", "IQ", "OQ", "IOQ", "PQ", "CD", "CV"]
     assert QUALIFICATION_TITLES["URS"] == ("사용자 요구규격서", "User Requirement Specification")
     assert QUALIFICATION_TITLES["F&DS"] == ("기능 및 설계 규격서", "Functional & Design Specification")
-    assert QUALIFICATION_TITLES["IQ"][1] == "Installation Qualifiaction"
-    assert QUALIFICATION_TITLES["OQ"][1] == "Operational Qualificiation"
+    assert QUALIFICATION_TITLES["IQ"][1] == "Installation Qualification"
+    assert QUALIFICATION_TITLES["OQ"][1] == "Operational Qualification"
     assert QUALIFICATION_TITLES["CV"] == ("과산화수소증기 사이클 검증", "Cycle Validation")
 
 
@@ -118,10 +120,27 @@ def test_cover_request_requires_english_equipment_name(tmp_path: Path) -> None:
         "패스박스",
         request.qualification_abbreviation,
         request.plan_number,
+        request.report_number,
         request.applicable_year,
     )
 
     assert "장비명은 영문으로 작성해 주세요." in invalid.validation_errors()
+
+
+def test_cover_request_requires_report_number(tmp_path: Path) -> None:
+    request = _request(tmp_path)
+    invalid = CoverDocumentRequest(
+        request.template_path,
+        request.customer_logo_path,
+        request.output_directory,
+        request.equipment_name,
+        request.qualification_abbreviation,
+        request.plan_number,
+        "",
+        request.applicable_year,
+    )
+
+    assert "보고서번호를 입력해 주세요." in invalid.validation_errors()
 
 
 def test_cover_widget_exposes_requested_inputs_and_drag_drop(tmp_path: Path, qapp) -> None:  # type: ignore[no-untyped-def]
@@ -132,11 +151,13 @@ def test_cover_widget_exposes_requested_inputs_and_drag_drop(tmp_path: Path, qap
     widget = CoverGeneratorWidget(build_application_context(AppSettings(), data_dir=tmp_path / "data"))
     widget.equipment_name.setText("Pass Box")
     widget.qualification.setCurrentText("CV")
+    widget.report_number.setText("VR-CV-PB-001")
 
     assert widget.equipment_name.placeholderText() == "영문으로 작성하세요."
     assert [widget.qualification.itemText(index) for index in range(widget.qualification.count())] == list(QUALIFICATION_TITLES)
     assert widget.qualification_korean.text() == "과산화수소증기 사이클 검증"
     assert widget.qualification_english.text() == "Cycle Validation"
+    assert widget.report_number.text() == "VR-CV-PB-001"
     assert widget.filename_preview.text() == "Pass Box_CV_cover.pdf"
     assert widget.template_input.acceptDrops()
     assert widget.logo_input.acceptDrops()
@@ -154,5 +175,7 @@ def test_excel_renderer_script_preserves_template_and_exports_two_sheets() -> No
     assert 'Set-ComProperty $pageSetup "FitToPagesTall" 1' in script
     assert "ExportAsFixedFormat" in script
     assert 'Invoke-ComMethod $shapes "AddPicture"' in script and '"LockAspectRatio" -1' in script
+    assert "foreach ($shape in $originalShapes)" in script
+    assert 'Get-ComItem $shapes' not in script
     assert 'Invoke-ComMethod $workbook "Close" @($false)' in script
     assert '"resources/scripts/*.ps1"' in spec

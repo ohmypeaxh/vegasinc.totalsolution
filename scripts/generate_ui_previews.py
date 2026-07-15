@@ -267,6 +267,7 @@ def generate_previews() -> None:
         cover_widget.equipment_name.setText("Pass Box")
         cover_widget.qualification.setCurrentText("IQ")
         cover_widget.plan_number.setText("VP-IQ-PB-001")
+        cover_widget.report_number.setText("VR-IQ-PB-001")
         cover_widget.applicable_year.setText("2026")
         cover_widget.template_input.set_path(Path("templates") / "demo_cover_template.xlsx")
         cover_widget.logo_input.set_path(Path("sample-data") / "customer_demo_logo.png")
@@ -283,7 +284,7 @@ def generate_previews() -> None:
         _save_widget(onboarding, "08_first_run_onboarding.png", app)
         onboarding.close()
 
-        about = AboutDialog("0.1.3", window)
+        about = AboutDialog("0.1.4", window)
         about.resize(640, 360)
         about.show()
         _save_widget(about, "09_about_dialog.png", app)

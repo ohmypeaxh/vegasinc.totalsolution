@@ -5,6 +5,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+$OutputEncoding = [Console]::OutputEncoding
 $script:FoundTokens = @{}
 $CentimetreToPoint = 28.3464566929
 
@@ -22,7 +23,7 @@ public static class VegasWindowProcess
 function Get-ComProperty {
     param([object]$ComObject, [string]$Name, [object[]]$Arguments = @())
     if ($null -eq $ComObject) {
-        throw "Excel COM 속성 '$Name'의 대상 개체가 없습니다."
+        throw "Excel COM property '$Name' has no target object."
     }
     try {
         $result = $ComObject.GetType().InvokeMember(
@@ -34,7 +35,7 @@ function Get-ComProperty {
         )
     }
     catch {
-        throw "Excel COM 속성 '$Name' 읽기에 실패했습니다: $($_.Exception.Message)"
+        throw "Failed to read Excel COM property '$Name': $($_.Exception.Message)"
     }
     Write-Output -NoEnumerate $result
 }
@@ -42,7 +43,7 @@ function Get-ComProperty {
 function Set-ComProperty {
     param([object]$ComObject, [string]$Name, [object]$Value)
     if ($null -eq $ComObject) {
-        throw "Excel COM 속성 '$Name'의 대상 개체가 없습니다."
+        throw "Excel COM property '$Name' has no target object."
     }
     try {
         [void]$ComObject.GetType().InvokeMember(
@@ -54,14 +55,14 @@ function Set-ComProperty {
         )
     }
     catch {
-        throw "Excel COM 속성 '$Name' 쓰기에 실패했습니다: $($_.Exception.Message)"
+        throw "Failed to write Excel COM property '$Name': $($_.Exception.Message)"
     }
 }
 
 function Invoke-ComMethod {
     param([object]$ComObject, [string]$Name, [object[]]$Arguments = @())
     if ($null -eq $ComObject) {
-        throw "Excel COM 메서드 '$Name'의 대상 개체가 없습니다."
+        throw "Excel COM method '$Name' has no target object."
     }
     try {
         $result = $ComObject.GetType().InvokeMember(
@@ -73,7 +74,7 @@ function Invoke-ComMethod {
         )
     }
     catch {
-        throw "Excel COM 메서드 '$Name' 호출에 실패했습니다: $($_.Exception.Message)"
+        throw "Failed to call Excel COM method '$Name': $($_.Exception.Message)"
     }
     Write-Output -NoEnumerate $result
 }
@@ -96,7 +97,7 @@ function Get-ComItem {
             $errors += $_.Exception.Message
         }
     }
-    throw "Excel COM 인덱서 '$Context' 접근에 실패했습니다: $($errors -join ' | ')"
+    throw "Failed to access Excel COM indexer '$Context': $($errors -join ' | ')"
 }
 
 function Get-ShapeText {
@@ -171,12 +172,56 @@ function Update-SheetPlaceholders {
     param([object]$Sheet, [object]$Request)
 
     $originalShapes = $null
+    $shapesToProcess = New-Object 'System.Collections.Generic.List[object]'
     try {
         $originalShapes = Get-ComProperty $Sheet "Shapes"
-        $originalShapeCount = [int](Get-ComProperty $originalShapes "Count")
+        foreach ($shape in $originalShapes) {
+            [void]$shapesToProcess.Add($shape)
+        }
     }
     finally {
         Release-ComObject $originalShapes
+    }
+
+    try {
+        foreach ($shape in $shapesToProcess) {
+            $text = Get-ShapeText $shape
+            if (-not $text) {
+                continue
+            }
+            $rendered = $text
+            foreach ($property in $Request.replacements.PSObject.Properties) {
+                $token = [string]$property.Name
+                if ($rendered.Contains($token)) {
+                    $script:FoundTokens[$token] = $true
+                    $rendered = $rendered.Replace($token, [string]$property.Value)
+                }
+            }
+            foreach ($placement in $Request.logo_placements) {
+                $token = [string]$placement.token
+                if (-not $rendered.Contains($token)) {
+                    continue
+                }
+                $script:FoundTokens[$token] = $true
+                $rendered = $rendered.Replace($token, "")
+                Add-CentredLogo `
+                    $Sheet `
+                    ([double](Get-ComProperty $shape "Left")) `
+                    ([double](Get-ComProperty $shape "Top")) `
+                    ([double](Get-ComProperty $shape "Width")) `
+                    ([double](Get-ComProperty $shape "Height")) `
+                    $Request.logo_path `
+                    $placement
+            }
+            if ($rendered -ne $text) {
+                Set-ShapeText $shape $rendered
+            }
+        }
+    }
+    finally {
+        foreach ($shape in $shapesToProcess) {
+            Release-ComObject $shape
+        }
     }
 
     $used = $null
@@ -270,53 +315,6 @@ function Update-SheetPlaceholders {
         Release-ComObject $used
     }
 
-    $shapes = $null
-    try {
-        $shapes = Get-ComProperty $Sheet "Shapes"
-        for ($index = 1; $index -le $originalShapeCount; $index++) {
-            $shape = $null
-            try {
-                $shape = Get-ComItem $shapes @($index) "Shapes[$index]"
-                $text = Get-ShapeText $shape
-                if (-not $text) {
-                    continue
-                }
-                $rendered = $text
-                foreach ($property in $Request.replacements.PSObject.Properties) {
-                    $token = [string]$property.Name
-                    if ($rendered.Contains($token)) {
-                        $script:FoundTokens[$token] = $true
-                        $rendered = $rendered.Replace($token, [string]$property.Value)
-                    }
-                }
-                foreach ($placement in $Request.logo_placements) {
-                    $token = [string]$placement.token
-                    if (-not $rendered.Contains($token)) {
-                        continue
-                    }
-                    $script:FoundTokens[$token] = $true
-                    $rendered = $rendered.Replace($token, "")
-                    Add-CentredLogo `
-                        $Sheet `
-                        ([double](Get-ComProperty $shape "Left")) `
-                        ([double](Get-ComProperty $shape "Top")) `
-                        ([double](Get-ComProperty $shape "Width")) `
-                        ([double](Get-ComProperty $shape "Height")) `
-                        $Request.logo_path `
-                        $placement
-                }
-                if ($rendered -ne $text) {
-                    Set-ShapeText $shape $rendered
-                }
-            }
-            finally {
-                Release-ComObject $shape
-            }
-        }
-    }
-    finally {
-        Release-ComObject $shapes
-    }
 }
 
 $excel = $null
@@ -330,7 +328,7 @@ try {
         $excel = New-Object -ComObject Excel.Application
     }
     catch {
-        throw "Microsoft Excel을 실행할 수 없습니다. 이 기능을 사용하려면 Microsoft Excel이 설치되어 있어야 합니다."
+        throw "Microsoft Excel could not be started. Install Microsoft Excel to use Cover Generator."
     }
     Set-ComProperty $excel "Visible" $false
     Set-ComProperty $excel "DisplayAlerts" $false
@@ -357,7 +355,7 @@ try {
                     $sheet = Get-ComItem $worksheets @([string]$export.sheet_name) "Worksheet[$($export.sheet_name)]"
                 }
                 catch {
-                    throw "Excel 템플릿에서 '$($export.sheet_name)' 시트를 찾을 수 없습니다."
+                    throw "Required worksheet '$($export.sheet_name)' was not found in the Excel template."
                 }
                 Update-SheetPlaceholders $sheet $request
             }
@@ -368,7 +366,7 @@ try {
 
         $missing = @($request.required_tokens | Where-Object { -not $script:FoundTokens.ContainsKey([string]$_) })
         if ($missing.Count -gt 0) {
-            throw "Excel 템플릿에서 필수 자리표시자를 찾을 수 없습니다: $($missing -join ', ')"
+            throw "Required placeholders were not found in the Excel template: $($missing -join ', ')"
         }
 
         [void](Invoke-ComMethod $excel "CalculateFull")
@@ -444,5 +442,5 @@ if ($null -ne $primaryError) {
     throw $primaryError
 }
 if ($null -ne $cleanupError) {
-    throw "Excel 변환은 완료했지만 Excel 종료 중 오류가 발생했습니다: $($cleanupError.Exception.Message)"
+    throw "Excel conversion completed, but Excel cleanup failed: $($cleanupError.Exception.Message)"
 }

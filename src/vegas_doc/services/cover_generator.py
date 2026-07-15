@@ -108,7 +108,9 @@ class ExcelPowerShellCoverRenderer:
             raise TimeoutError("Excel PDF 변환 시간이 초과되었습니다. Excel 대화상자가 열려 있는지 확인해 주세요.") from error
         if result.returncode != 0:
             details = (result.stderr or result.stdout).strip()
-            raise RuntimeError(details or "Excel PDF 변환에 실패했습니다. Microsoft Excel 설치 상태를 확인해 주세요.")
+            if details:
+                raise RuntimeError(f"Excel PDF 변환 오류:\n{details}")
+            raise RuntimeError("Excel PDF 변환에 실패했습니다. Microsoft Excel 설치 상태를 확인해 주세요.")
         missing = tuple(path for path in exports if not path.is_file())
         if missing:
             raise RuntimeError("Excel이 필수 PDF 페이지를 생성하지 못했습니다: " + ", ".join(path.name for path in missing))

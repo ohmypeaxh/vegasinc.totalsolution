@@ -145,13 +145,20 @@ def test_picture_request_requires_at_least_one_valid_image(tmp_path: Path) -> No
         tmp_path / "missing.png",
         tmp_path,
         RawDataType.TWO_CUT_COMMENT,
-        QualificationType.INSTALLATION_AND_QUALIFICATION,
+        QualificationType.INSTALLATION_AND_OPERATIONAL_QUALIFICATION,
         "RD-001",
     )
 
     errors = request.validation_errors()
 
     assert "첨부할 사진을 한 장 이상 추가해 주세요." in errors
+
+
+def test_qualification_types_include_correct_ioq_title() -> None:
+    assert QualificationType.INSTALLATION_AND_OPERATIONAL_QUALIFICATION.value == (
+        "INSTALLATION & OPERATIONAL QUALIFICATION"
+    )
+    assert "INSTALLATION & QUALIFICATION" not in [item.value for item in QualificationType]
 
 
 def test_raw_data_widget_switches_mode_specific_inputs_and_reorders_images(tmp_path: Path, qapp) -> None:  # type: ignore[no-untyped-def]

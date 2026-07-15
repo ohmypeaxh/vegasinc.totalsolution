@@ -97,6 +97,7 @@ class CoverGeneratorWidget(QWidget):
         self.qualification_english.setWordWrap(True)
         self.qualification.currentTextChanged.connect(self._update_qualification_preview)
         self.plan_number = QLineEdit()
+        self.report_number = QLineEdit()
         self.applicable_year = QLineEdit()
         self.applicable_year.setPlaceholderText("예: 2026")
         form.addRow("장비명 *", self.equipment_name)
@@ -104,6 +105,7 @@ class CoverGeneratorWidget(QWidget):
         form.addRow("적격성평가한글", self.qualification_korean)
         form.addRow("적격성평가영문", self.qualification_english)
         form.addRow("계획서번호 *", self.plan_number)
+        form.addRow("보고서번호 *", self.report_number)
         form.addRow("해당년도 *", self.applicable_year)
         layout.addWidget(document_group)
 
@@ -170,6 +172,7 @@ class CoverGeneratorWidget(QWidget):
             equipment_name=self.equipment_name.text().strip(),
             qualification_abbreviation=self.qualification.currentText(),
             plan_number=self.plan_number.text().strip(),
+            report_number=self.report_number.text().strip(),
             applicable_year=self.applicable_year.text().strip(),
         )
 

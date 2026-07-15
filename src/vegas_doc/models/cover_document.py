@@ -13,8 +13,8 @@ QUALIFICATION_TITLES: dict[str, tuple[str, str]] = {
     "DQ": ("설계적격성평가", "Design Qualification"),
     "FAT": ("공장적합성시험", "Factory Acceptance Test"),
     "SAT": ("제조소적합성시험", "Site Acceptance Test"),
-    "IQ": ("설치적격성평가", "Installation Qualifiaction"),
-    "OQ": ("운전적격성평가", "Operational Qualificiation"),
+    "IQ": ("설치적격성평가", "Installation Qualification"),
+    "OQ": ("운전적격성평가", "Operational Qualification"),
     "IOQ": ("설치 및 운전적격성평가", "Installation & Operational Qualification"),
     "PQ": ("성능적격성평가", "Performance Qualification"),
     "CD": ("과산화수소증기 사이클 개발", "Cycle Development"),
@@ -27,6 +27,7 @@ TEXT_PLACEHOLDERS = (
     "##적격성평가한글##",
     "##적격성평가영문##",
     "##계획서번호##",
+    "##보고서번호##",
     "##해당년도##",
 )
 LOGO_PLACEHOLDERS = tuple(f"##고객사로고{index}##" for index in range(1, 6))
@@ -43,6 +44,7 @@ class CoverDocumentRequest:
     equipment_name: str
     qualification_abbreviation: str
     plan_number: str
+    report_number: str
     applicable_year: str
 
     def replacements(self) -> dict[str, str]:
@@ -55,6 +57,7 @@ class CoverDocumentRequest:
             "##적격성평가한글##": korean,
             "##적격성평가영문##": english,
             "##계획서번호##": self.plan_number.strip(),
+            "##보고서번호##": self.report_number.strip(),
             "##해당년도##": self.applicable_year.strip(),
         }
 
@@ -77,6 +80,8 @@ class CoverDocumentRequest:
             errors.append("적격성평가 종류를 선택해 주세요.")
         if not self.plan_number.strip():
             errors.append("계획서번호를 입력해 주세요.")
+        if not self.report_number.strip():
+            errors.append("보고서번호를 입력해 주세요.")
         if not self.applicable_year.strip():
             errors.append("해당년도를 입력해 주세요.")
         if self.template_path.suffix.lower() != ".xlsx" or not self.template_path.is_file():
