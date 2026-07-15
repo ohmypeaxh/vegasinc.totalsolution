@@ -98,22 +98,33 @@ class ClovaOCRProvider(OCRProvider):
         images = data.get("images", [])
         if not isinstance(images, list) or not images:
             raise RuntimeError("CLOVA OCR response did not include images")
-        fields: list[str] = []
+        lines: list[str] = []
         confidences: list[float] = []
         for image in images:
             if not isinstance(image, dict):
                 continue
-            for field in image.get("fields", []) or []:
+            image_fields = [field for field in image.get("fields", []) or [] if isinstance(field, dict)]
+            has_line_break_metadata = any("lineBreak" in field for field in image_fields)
+            current_line: list[str] = []
+            for field in image_fields:
                 if not isinstance(field, dict):
                     continue
                 text = str(field.get("inferText", "")).strip()
                 if text:
-                    fields.append(text)
+                    if has_line_break_metadata:
+                        current_line.append(text)
+                    else:
+                        lines.append(text)
                 confidence = field.get("inferConfidence")
                 if isinstance(confidence, int | float):
                     confidences.append(float(confidence))
+                if has_line_break_metadata and field.get("lineBreak") and current_line:
+                    lines.append(" ".join(current_line))
+                    current_line = []
+            if current_line:
+                lines.append(" ".join(current_line))
         confidence_value = sum(confidences) / len(confidences) if confidences else None
-        return OCRPageResult(page_number, "\n".join(fields), confidence_value, provider_metadata={"provider": self.provider_name})
+        return OCRPageResult(page_number, "\n".join(lines), confidence_value, provider_metadata={"provider": self.provider_name})
 
 
 def _format_for_path(path: Path, mime_type: str | None) -> str:

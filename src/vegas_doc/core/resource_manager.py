@@ -31,3 +31,12 @@ class ResourceManager:
 
         candidate = self.path(*parts)
         return candidate if candidate.exists() else None
+
+    def branding_path(self, filename: str) -> Path | None:
+        """Resolve a branding asset in packaged and source executions."""
+
+        packaged = self.optional_path("branding", filename)
+        if packaged is not None:
+            return packaged
+        source_asset = Path(__file__).resolve().parents[3] / "assets" / filename
+        return source_asset if source_asset.is_file() else None

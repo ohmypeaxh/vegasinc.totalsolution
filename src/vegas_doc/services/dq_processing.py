@@ -8,11 +8,15 @@ from pathlib import Path
 
 from vegas_doc.models.dq_mapping import DQMapping, DQResponse, MappingRelationship
 from vegas_doc.models.extraction import DocumentExtractionResult
+from vegas_doc.models.dq_document_data import section_key
 from vegas_doc.models.urs import RequirementPriority, URSRequirement, VerificationMethod
+from vegas_doc.services.numbered_text import numbered_text_blocks
 
 _REQUIREMENT_WORDS = re.compile(r"\b(shall|must|should|required|requires?)\b|해야\s*한다|하여야\s*한다|필수|요구|되어야\s*한다", re.I)
+_OBLIGATION_WORDS = re.compile(r"\b(shall|must|should|required|requires?)\b|해야\s*한다|하여야\s*한다|필수|되어야\s*한다", re.I)
 _ID_PATTERN = re.compile(r"\b(?:URS[-_\s]?)?(\d{1,4}(?:\.\d+)*)\b", re.I)
 _HEADING_WORDS = re.compile(r"^(table of contents|contents|목차|revision|개정|chapter|section)\b", re.I)
+_SECTION_PREFIX = re.compile(r"^\s*(?P<number>\d+(?:\.\d+)*)(?:\s+|\s*[|:)\-]\s*)(?P<text>.+)$")
 
 DEFAULT_CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "Safety": ("safety", "alarm", "interlock", "emergency", "안전", "알람", "인터록"),
@@ -35,29 +39,105 @@ CATEGORY_SECTIONS: dict[str, str] = {
 class DefaultURSParser:
     """Deterministic default URS parser for English/Korean requirement text."""
 
-    def parse(self, extraction: DocumentExtractionResult) -> tuple[URSRequirement, ...]:
+    def parse(
+        self,
+        extraction: DocumentExtractionResult,
+        start_section: str | None = None,
+        end_section: str | None = None,
+    ) -> tuple[URSRequirement, ...]:
+        """Parse traceable requirements, optionally within an inclusive numeric range."""
+
+        if start_section and end_section:
+            return self._parse_numbered_range(extraction, start_section, end_section)
+
         requirements: list[URSRequirement] = []
         seen: dict[str, int] = {}
+        current_section: str | None = None
+        heading_depth = max(len(section_key(start_section)), len(section_key(end_section))) if start_section and end_section else 1
         for page in extraction.pages:
             blocks = _candidate_blocks(page.reviewed_text or page.normalized_text or page.original_text)
             for block in blocks:
-                if _HEADING_WORDS.search(block) or not _REQUIREMENT_WORDS.search(block):
+                section_match = _SECTION_PREFIX.match(block)
+                section_number = section_match.group("number") if section_match else None
+                if section_number and start_section and end_section and not section_in_range(section_number, start_section, end_section):
+                    continue
+                if _HEADING_WORDS.search(block):
+                    continue
+                is_range_heading = (
+                    section_number is not None
+                    and len(section_key(section_number)) <= heading_depth
+                    and not _OBLIGATION_WORDS.search(block)
+                    and not re.search(r"\bURS[-_\s]?\d+", block, re.I)
+                )
+                if section_match and (is_range_heading or (not _REQUIREMENT_WORDS.search(block) and not re.search(r"\bURS[-_\s]?\d+", block, re.I))):
+                    current_section = _clean_requirement_text(block)
+                    continue
+                if not _REQUIREMENT_WORDS.search(block):
                     continue
                 requirement_id = _extract_requirement_id(block, len(requirements) + 1)
                 seen[requirement_id] = seen.get(requirement_id, 0) + 1
                 unique_id = requirement_id if seen[requirement_id] == 1 else f"{requirement_id}-DUP{seen[requirement_id]}"
+                source_section = current_section
+                if source_section is None and section_number:
+                    source_section = _parent_section(section_number)
                 requirements.append(
                     URSRequirement(
                         requirement_id=unique_id,
                         source_document=page.source_path,
                         source_page=page.page_number,
-                        source_section=None,
+                        source_section=source_section,
                         original_text=block,
                         normalized_text=_clean_requirement_text(block),
                         confidence=page.confidence,
                     )
                 )
         return tuple(requirements)
+
+    def _parse_numbered_range(
+        self,
+        extraction: DocumentExtractionResult,
+        start_section: str,
+        end_section: str,
+    ) -> tuple[URSRequirement, ...]:
+        """Parse table-style numbered rows, including specification phrases without verbs."""
+
+        requirements: list[URSRequirement] = []
+        seen: dict[str, int] = {}
+        current_section: str | None = None
+        heading_depth = max(len(section_key(start_section)), len(section_key(end_section)))
+        for page in extraction.pages:
+            text = page.reviewed_text or page.normalized_text or page.original_text
+            for block in numbered_text_blocks(text, start_section, end_section):
+                content = _clean_requirement_text(block.text)
+                has_obligation = bool(_OBLIGATION_WORDS.search(content))
+                if len(section_key(block.number)) <= heading_depth and not has_obligation:
+                    current_section = f"{block.number} {content}".strip()
+                    continue
+                if not content:
+                    continue
+                seen[block.number] = seen.get(block.number, 0) + 1
+                requirement_id = block.number if seen[block.number] == 1 else f"{block.number}-DUP{seen[block.number]}"
+                requirements.append(
+                    URSRequirement(
+                        requirement_id=requirement_id,
+                        source_document=page.source_path,
+                        source_page=page.page_number,
+                        source_section=current_section or _parent_section(block.number),
+                        original_text=f"{block.number} {content}",
+                        normalized_text=content,
+                        confidence=page.confidence,
+                    )
+                )
+        return tuple(requirements)
+
+
+def section_in_range(value: str, start: str, end: str) -> bool:
+    """Return whether a hierarchical number is in an inclusive section range."""
+
+    value_key = section_key(value)
+    start_key = section_key(start)
+    end_key = section_key(end)
+    return value_key >= start_key and (value_key <= end_key or value_key[: len(end_key)] == end_key)
 
 
 class KeywordRequirementClassifier:
@@ -116,7 +196,8 @@ class DQProjectValidator:
             errors.append("유효한 Word 템플릿을 선택해 주세요.")
         if not output_path.name or output_path.suffix.lower() != ".docx":
             errors.append("출력 파일명은 .docx 형식이어야 합니다.")
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        if not output_path.parent.is_dir():
+            errors.append(f"저장 폴더를 찾을 수 없습니다: {output_path.parent}")
         return errors
 
 
@@ -161,12 +242,17 @@ def _extract_requirement_id(text: str, fallback: int) -> str:
         return f"URS-{match.group(1).replace('.', '-') }"
     numeric = _ID_PATTERN.search(text)
     if numeric:
-        return f"URS-{numeric.group(1).replace('.', '-') }"
+        return numeric.group(1)
     return f"URS-AUTO-{fallback:03d}"
 
 
 def _clean_requirement_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _parent_section(section_number: str) -> str:
+    parts = section_number.split(".")
+    return ".".join(parts[:-1] if len(parts) > 1 else parts)
 
 
 def _verification_for(category: str) -> VerificationMethod:

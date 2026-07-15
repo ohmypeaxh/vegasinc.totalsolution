@@ -2,26 +2,33 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, Qt, QThread, Signal
-from PySide6.QtWidgets import QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QTableView, QTextEdit, QVBoxLayout, QWidget
+from PySide6.QtCore import QAbstractTableModel, QDate, QModelIndex, QObject, Qt, QThread, Signal
+from PySide6.QtGui import QBrush, QColor
+from PySide6.QtWidgets import (QApplication, QDateEdit, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QScrollArea, QTableView, QTextEdit, QVBoxLayout, QWidget)
 
 from vegas_doc.core.application_context import ApplicationContext
 from vegas_doc.core.config_manager import ConfigManager
+from vegas_doc.models.dq_document_data import DQDocumentData
 from vegas_doc.models.dq_mapping import DQResponse
 from vegas_doc.models.extraction import ExtractionPolicy
 from vegas_doc.models.project import DQProject, PROJECT_SCHEMA_VERSION, ProjectInfo, TemplateSettings
 from vegas_doc.models.urs import URSRequirement
 from vegas_doc.plugins.plugin import Plugin, PluginMetadata
 from vegas_doc.services.clova_ocr import ClovaOCRProvider, ClovaOCRSettings
-from vegas_doc.services.document_extraction import PyMuPDFDocumentTextExtractor
+from vegas_doc.services.document_extraction import PyMuPDFDocumentTextExtractor, extraction_failure_message
 from vegas_doc.services.docx_generator import DQDocxGenerator
 from vegas_doc.services.dq_processing import DQProjectValidator, DQSuggestionService, DefaultURSParser, KeywordRequirementClassifier, build_mappings
 from vegas_doc.services.ocr import ProviderOCRService
 from vegas_doc.services.project_persistence import DQProjectRepository
 from vegas_doc.services.secrets import KeyringSecretStore
+from vegas_doc.services.word_template import InvalidTemplateFormatError
+from vegas_doc.ui.document_review_warning import confirm_ocr_document_review
+from vegas_doc.ui.widgets.file_path_input import FilePathInput
+from vegas_doc.utils.date_format import QT_DOCUMENT_DATE_FORMAT, format_document_date
 
 
 class DQExtractionWorker(QObject):
@@ -31,9 +38,11 @@ class DQExtractionWorker(QObject):
     completed = Signal(tuple)
     failed = Signal(str)
 
-    def __init__(self, source_path: Path, context: ApplicationContext) -> None:
+    def __init__(self, source_path: Path, start_section: str, end_section: str, context: ApplicationContext) -> None:
         super().__init__()
         self._source_path = source_path
+        self._start_section = start_section
+        self._end_section = end_section
         self._context = context
         self._cancelled = False
 
@@ -47,12 +56,21 @@ class DQExtractionWorker(QObject):
             ocr_service = ProviderOCRService(provider)
             extractor = PyMuPDFDocumentTextExtractor(ocr_service)
             self.progress.emit(10, "문서 추출 중...")
-            extraction = extractor.extract(self._source_path, _kind_for_path(self._source_path), ExtractionPolicy())
+            extraction = extractor.extract_range(
+                self._source_path,
+                _kind_for_path(self._source_path),
+                ExtractionPolicy(),
+                self._start_section,
+                self._end_section,
+            )
+            failure = extraction_failure_message(extraction)
+            if failure is not None:
+                raise RuntimeError(failure)
             if self._cancelled:
                 self.failed.emit("작업이 취소되었습니다.")
                 return
             self.progress.emit(60, "URS 요구사항 분석 중...")
-            requirements = DefaultURSParser().parse(extraction)
+            requirements = DefaultURSParser().parse(extraction, self._start_section, self._end_section)
             classifier = KeywordRequirementClassifier()
             suggester = DQSuggestionService()
             classified = tuple(replace(classifier.classify(item), user_reviewed=True) for item in requirements)
@@ -61,13 +79,14 @@ class DQExtractionWorker(QObject):
             self.progress.emit(100, "완료")
             self.completed.emit((extraction, classified, responses, mappings))
         except Exception as error:
-            self.failed.emit(str(error))
+            self._context.services.resolve(logging.Logger).exception("DQ extraction failed")
+            self.failed.emit(f"URS 분석 중 오류가 발생했습니다: {error}")
 
 
 class RequirementTableModel(QAbstractTableModel):
     """Editable requirement review table model."""
 
-    HEADERS = ["Include", "Status", "ID", "Source", "Page", "Original", "Reviewed", "Category", "Section", "Response", "Verification", "Confidence", "Notes"]
+    HEADERS = ["선택", "상태", "URS 번호", "요구사항 제목", "페이지", "원문", "URS 내용", "분류", "DQ 섹션", "DQ 응답", "검증", "신뢰도", "메모"]
 
     def __init__(self) -> None:
         super().__init__()
@@ -81,13 +100,19 @@ class RequirementTableModel(QAbstractTableModel):
         return 0 if parent.isValid() else len(self.HEADERS)
 
     def data(self, index: QModelIndex, role: int = Qt.DisplayRole):  # type: ignore[no-untyped-def]
-        if not index.isValid() or role not in {Qt.DisplayRole, Qt.EditRole, Qt.CheckStateRole}:
+        if not index.isValid():
             return None
         req = self.requirements[index.row()]
         col = index.column()
         if col == 0 and role == Qt.CheckStateRole:
             return Qt.Checked if req.included else Qt.Unchecked
-        values = [req.included, "Reviewed" if req.user_reviewed else "Needs Review", req.requirement_id, str(req.source_document), req.source_page, req.original_text, req.normalized_text, req.category or "", req.dq_section or "", self.responses.get(req.requirement_id).text if self.responses.get(req.requirement_id) else "", req.verification_method.value, req.confidence or "", req.user_notes or ""]
+        if role == Qt.BackgroundRole and req.confidence is not None and req.confidence < 0.7:
+            return QBrush(QColor("#fff0cc"))
+        if role == Qt.ToolTipRole and req.confidence is not None and req.confidence < 0.7:
+            return "OCR 신뢰도가 낮습니다. 원문과 비교해 확인해 주세요."
+        if role not in {Qt.DisplayRole, Qt.EditRole}:
+            return None
+        values = [req.included, "검토 완료" if req.user_reviewed else "확인 필요", req.requirement_id, req.source_section or "", req.source_page, req.original_text, req.normalized_text, req.category or "", req.dq_section or "", self.responses.get(req.requirement_id).text if self.responses.get(req.requirement_id) else "", req.verification_method.value, "" if req.confidence is None else f"{req.confidence:.0%}", req.user_notes or ""]
         return values[col]
 
     def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.DisplayRole):  # type: ignore[no-untyped-def]
@@ -99,7 +124,7 @@ class RequirementTableModel(QAbstractTableModel):
         flags = super().flags(index)
         if index.column() == 0:
             return flags | Qt.ItemIsUserCheckable | Qt.ItemIsEditable
-        if index.column() in {6, 7, 8, 9, 12}:
+        if index.column() in {2, 3, 6, 7, 8, 9, 12}:
             return flags | Qt.ItemIsEditable
         return flags
 
@@ -110,6 +135,16 @@ class RequirementTableModel(QAbstractTableModel):
         col = index.column()
         if col == 0 and role == Qt.CheckStateRole:
             self.requirements[index.row()] = replace(req, included=value == Qt.Checked, user_reviewed=True)
+        elif role == Qt.EditRole and col == 2:
+            new_id = str(value).strip()
+            if not new_id or any(item.requirement_id == new_id for row, item in enumerate(self.requirements) if row != index.row()):
+                return False
+            response = self.responses.pop(req.requirement_id, None)
+            self.requirements[index.row()] = replace(req, requirement_id=new_id, user_reviewed=True)
+            if response is not None:
+                self.responses[new_id] = replace(response, response_id=f"RESP-{new_id}")
+        elif role == Qt.EditRole and col == 3:
+            self.requirements[index.row()] = replace(req, source_section=str(value).strip(), user_reviewed=True)
         elif role == Qt.EditRole and col == 6:
             self.requirements[index.row()] = replace(req, normalized_text=str(value), user_reviewed=True)
         elif role == Qt.EditRole and col == 7:
@@ -131,6 +166,40 @@ class RequirementTableModel(QAbstractTableModel):
         self.responses = dict(responses)
         self.endResetModel()
 
+    def add_item(self, source_document: Path, after_row: int | None = None) -> int:
+        """Add an editable review row and return its index."""
+
+        row = len(self.requirements) if after_row is None else min(after_row + 1, len(self.requirements))
+        number = 1
+        while any(item.requirement_id == f"URS-NEW-{number:03d}" for item in self.requirements):
+            number += 1
+        requirement = URSRequirement(
+            f"URS-NEW-{number:03d}", source_document, 1, "새 요구사항", "새 요구사항", "새 요구사항", confidence=None
+        )
+        self.beginInsertRows(QModelIndex(), row, row)
+        self.requirements.insert(row, requirement)
+        self.endInsertRows()
+        return row
+
+    def remove_item(self, row: int) -> bool:
+        if not 0 <= row < len(self.requirements):
+            return False
+        self.beginRemoveRows(QModelIndex(), row, row)
+        requirement = self.requirements.pop(row)
+        self.responses.pop(requirement.requirement_id, None)
+        self.endRemoveRows()
+        return True
+
+    def move_item(self, row: int, offset: int) -> int:
+        target = row + offset
+        if not 0 <= row < len(self.requirements) or not 0 <= target < len(self.requirements):
+            return row
+        self.beginResetModel()
+        item = self.requirements.pop(row)
+        self.requirements.insert(target, item)
+        self.endResetModel()
+        return target
+
 
 class DQGeneratorWidget(QWidget):
     """Responsive DQ Generator page with import, review, project, and generation actions."""
@@ -148,81 +217,280 @@ class DQGeneratorWidget(QWidget):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(28, 24, 28, 24)
+        root.setSpacing(8)
+        eyebrow = QLabel("DOCUMENT AUTOMATION")
+        eyebrow.setObjectName("Eyebrow")
+        root.addWidget(eyebrow)
         title = QLabel("DQ Generator")
         title.setObjectName("PageTitle")
-        layout.addWidget(title)
-        form = QFormLayout()
-        self.project_name = QLineEdit()
+        root.addWidget(title)
+        subtitle = QLabel("URS 요구사항을 검토하고 검증 가능한 Design Qualification 문서를 생성합니다.")
+        subtitle.setObjectName("PageSubtitle")
+        subtitle.setWordWrap(True)
+        root.addWidget(subtitle)
+        root.addSpacing(12)
+
+        scroll = QScrollArea()
+        scroll.setObjectName("WorkspaceScroll")
+        scroll.setWidgetResizable(True)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+
+        basic_group = QGroupBox("A. 기본 정보")
+        basic_form = QFormLayout(basic_group)
         self.document_number = QLineEdit()
-        self.source_path = QLineEdit()
-        self.template_path = QLineEdit(str(Path("templates/default_dq_template.docx")))
-        self.output_path = QLineEdit(str(Path("output/dq_output.docx")))
-        form.addRow("Project", self.project_name)
-        form.addRow("Document No.", self.document_number)
-        form.addRow("URS/PDF/Image", self.source_path)
-        form.addRow("Template", self.template_path)
-        form.addRow("Output", self.output_path)
-        layout.addLayout(form)
-        buttons = QHBoxLayout()
-        for text, slot in [("Import", self.import_file), ("Extract/Retry", self.start_extraction), ("Cancel", self.cancel), ("Save Project", self.save_project), ("Open Project", self.open_project), ("Generate", self.generate_docx)]:
-            button = QPushButton(text)
-            button.clicked.connect(slot)
-            buttons.addWidget(button)
-        buttons.addStretch()
-        layout.addLayout(buttons)
-        self.status = QLabel("대기 중")
+        self.version_number = QLineEdit("00")
+        self.equipment_name = QLineEdit()
+        self.project_name = self.equipment_name
+        self.author_name = QLineEdit()
+        self.author_date = QDateEdit(QDate.currentDate())
+        self.author_date.setCalendarPopup(True)
+        self.author_date.setDisplayFormat(QT_DOCUMENT_DATE_FORMAT)
+        self.author_position = QLineEdit()
+        self.author_position.setPlaceholderText("직위를 직접 입력하세요.")
+        self.vendor_name = QLineEdit()
+        for label, widget in (
+            ("문서번호 *", self.document_number),
+            ("버전번호 *", self.version_number),
+            ("장비명 *", self.equipment_name),
+            ("작성자 *", self.author_name),
+            ("작성일 *", self.author_date),
+            ("작성자 직위 *", self.author_position),
+            ("업체명 *", self.vendor_name),
+        ):
+            basic_form.addRow(label, widget)
+        content_layout.addWidget(basic_group)
+
+        files_group = QGroupBox("B. 파일 첨부")
+        files_form = QFormLayout(files_group)
+        self.logo_input = FilePathInput(
+            extensions=(".png", ".jpg", ".jpeg"),
+            dialog_filter="Logo images (*.png *.jpg *.jpeg)",
+            drop_text="로고 파일을 이곳에 끌어 놓으세요.",
+        )
+        self.template_input = FilePathInput(
+            extensions=(".docx",),
+            dialog_filter="Word template (*.docx)",
+            drop_text="Word 템플릿을 이곳에 끌어 놓으세요.",
+        )
+        self.urs_input = FilePathInput(
+            extensions=(".pdf",),
+            dialog_filter="URS PDF (*.pdf)",
+            drop_text="URS PDF 파일을 이곳에 끌어 놓으세요.",
+        )
+        self.logo_path = self.logo_input.line_edit
+        self.template_path = self.template_input.line_edit
+        self.source_path = self.urs_input.line_edit
+        files_form.addRow("회사 로고 *", self.logo_input)
+        files_form.addRow("Word 템플릿 *", self.template_input)
+        files_form.addRow("URS PDF *", self.urs_input)
+        content_layout.addWidget(files_group)
+
+        range_group = QGroupBox("C. URS 추출 범위")
+        range_form = QFormLayout(range_group)
+        self.start_requirement = QLineEdit("6.4")
+        self.end_requirement = QLineEdit("6.8")
+        range_form.addRow("시작 요구사항 번호 *", self.start_requirement)
+        range_form.addRow("종료 요구사항 번호 *", self.end_requirement)
+        analyze = QPushButton("URS 분석")
+        analyze.clicked.connect(self.start_extraction)
+        range_form.addRow("", analyze)
+        content_layout.addWidget(range_group)
+
+        review_group = QGroupBox("D. OCR 결과 미리보기")
+        review_layout = QVBoxLayout(review_group)
+        review_layout.setContentsMargins(16, 24, 16, 20)
+        review_layout.setSpacing(14)
         self.page_review = QTextEdit()
-        self.page_review.setPlaceholderText("페이지 텍스트 검토/수정 영역")
+        self.page_review.setPlaceholderText("PDF/OCR 원문 검토 및 수정 영역")
+        self.page_review.setMinimumHeight(320)
         self.model = RequirementTableModel()
         self.table = QTableView()
         self.table.setModel(self.model)
-        self.table.setSortingEnabled(True)
-        layout.addWidget(self.status)
-        layout.addWidget(self.page_review, 1)
-        layout.addWidget(self.table, 3)
+        self.table.setSortingEnabled(False)
+        self.table.setMinimumHeight(480)
+        review_group.setMinimumHeight(970)
+        review_layout.addWidget(self.page_review)
+        review_layout.addWidget(self.table)
+        review_layout.setStretch(0, 2)
+        review_layout.setStretch(1, 3)
+        self.review_actions_bar = QWidget()
+        review_actions = QHBoxLayout(self.review_actions_bar)
+        review_actions.setContentsMargins(0, 10, 0, 0)
+        review_actions.setSpacing(8)
+        for text, slot in (
+            ("행 추가", self.add_review_row),
+            ("행 삭제", self.delete_review_row),
+            ("위로", lambda: self.move_review_row(-1)),
+            ("아래로", lambda: self.move_review_row(1)),
+            ("OCR 다시 실행", self.retry_ocr),
+        ):
+            button = QPushButton(text)
+            button.clicked.connect(slot)
+            review_actions.addWidget(button)
+        review_actions.addStretch()
+        review_layout.addWidget(self.review_actions_bar)
+        content_layout.addWidget(review_group)
+
+        output_group = QGroupBox("E. 출력 설정")
+        output_form = QFormLayout(output_group)
+        self.output_directory_input = FilePathInput(mode="directory", drop_text="결과 저장 폴더")
+        self.output_directory_input.set_path(Path("output"))
+        self.output_path = self.output_directory_input.line_edit
+        self.output_filename = QLineEdit()
+        self.output_filename.setPlaceholderText("미입력 시 문서번호_장비명_DQ_작성일.docx")
+        output_form.addRow("저장 위치 *", self.output_directory_input)
+        output_form.addRow("결과 파일명", self.output_filename)
+        content_layout.addWidget(output_group)
+
+        action_row = QHBoxLayout()
+        for text, slot in (
+            ("OCR 결과 검토", lambda: self.table.setFocus()),
+            ("Save Project", self.save_project),
+            ("Open Project", self.open_project),
+            ("입력값 초기화", self.reset_inputs),
+            ("작업 취소", self.cancel),
+        ):
+            button = QPushButton(text)
+            button.clicked.connect(slot)
+            action_row.addWidget(button)
+        self.generate_button = QPushButton("Word 문서 생성")
+        self.generate_button.setObjectName("PrimaryAction")
+        self.generate_button.clicked.connect(self.generate_docx)
+        action_row.addWidget(self.generate_button)
+        content_layout.addLayout(action_row)
+
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        self.status = QLabel("대기 중")
+        content_layout.addWidget(self.progress)
+        content_layout.addWidget(self.status)
+        content_layout.addStretch()
+        scroll.setWidget(content)
+        root.addWidget(scroll)
+
+    def current_document_data(self) -> DQDocumentData:
+        return DQDocumentData(
+            logo_path=Path(self.logo_path.text().strip()),
+            template_path=Path(self.template_path.text().strip()),
+            urs_pdf_path=Path(self.source_path.text().strip()),
+            document_number=self.document_number.text().strip(),
+            version_number=self.version_number.text().strip(),
+            equipment_name=self.equipment_name.text().strip(),
+            author_name=self.author_name.text().strip(),
+            author_date=self.author_date.date().toPython(),
+            author_position=self.author_position.text().strip(),
+            vendor_name=self.vendor_name.text().strip(),
+            start_requirement=self.start_requirement.text().strip(),
+            end_requirement=self.end_requirement.text().strip(),
+            output_directory=Path(self.output_directory_input.path()),
+            output_filename=self.output_filename.text().strip(),
+        )
+
+    def reset_inputs(self) -> None:
+        for field in (self.document_number, self.equipment_name, self.author_name, self.author_position, self.vendor_name, self.logo_path, self.template_path, self.source_path, self.output_filename):
+            field.clear()
+        self.version_number.setText("00")
+        self.author_date.setDate(QDate.currentDate())
+        self.start_requirement.setText("6.4")
+        self.end_requirement.setText("6.8")
+        self.model.set_items((), {})
+        self.page_review.clear()
+        self.progress.setValue(0)
+        self.status.setText("입력값을 초기화했습니다.")
+        self._dirty = False
 
     def import_file(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "URS/PDF/Image 선택", "", "Documents (*.pdf *.png *.jpg *.jpeg *.tif *.tiff)")
-        if path:
-            self.source_path.setText(path)
-            self._dirty = True
+        self.urs_input.browse()
+        self._dirty = bool(self.source_path.text().strip())
 
     def start_extraction(self) -> None:
-        source = Path(self.source_path.text().strip())
-        if not source.exists():
-            QMessageBox.warning(self, "입력 확인", "가져올 URS/PDF/Image 파일을 선택해 주세요.")
+        if self._thread is not None and self._thread.isRunning():
+            QMessageBox.information(self, "작업 진행 중", "이미 URS 분석 작업이 진행 중입니다.")
+            return
+        data = self.current_document_data()
+        range_errors = [error for error in data.validation_errors(require_existing_files=False) if "요구사항 번호" in error]
+        source = data.urs_pdf_path
+        if source.suffix.lower() != ".pdf" or not source.is_file():
+            range_errors.append("유효한 URS PDF 파일을 선택해 주세요.")
+        if range_errors:
+            QMessageBox.warning(self, "입력 확인", "\n".join(dict.fromkeys(range_errors)))
             return
         self._thread = QThread()
-        self._worker = DQExtractionWorker(source, self._context)
+        self._worker = DQExtractionWorker(source, data.start_requirement, data.end_requirement, self._context)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
-        self._worker.progress.connect(lambda _value, message: self.status.setText(message))
+        self._worker.progress.connect(self._on_progress)
         self._worker.completed.connect(self._on_extracted)
         self._worker.failed.connect(self._on_failed)
+        self._worker.completed.connect(self._worker.deleteLater)
+        self._worker.failed.connect(self._worker.deleteLater)
         self._thread.start()
 
     def cancel(self) -> None:
         if self._worker:
             self._worker.cancel()
 
+    def retry_ocr(self) -> None:
+        """Re-run extraction after settings or review corrections change."""
+
+        self.start_extraction()
+
+    def add_review_row(self) -> None:
+        current = self.table.currentIndex().row()
+        source = Path(self.source_path.text().strip() or "manual-entry.pdf")
+        row = self.model.add_item(source, current if current >= 0 else None)
+        self.table.selectRow(row)
+        self._dirty = True
+
+    def delete_review_row(self) -> None:
+        row = self.table.currentIndex().row()
+        if self.model.remove_item(row):
+            self._dirty = True
+
+    def move_review_row(self, offset: int) -> None:
+        row = self.table.currentIndex().row()
+        target = self.model.move_item(row, offset)
+        if target != row:
+            self.table.selectRow(target)
+            self._dirty = True
+
+    def _on_progress(self, value: int, message: str) -> None:
+        self.progress.setValue(value)
+        self.status.setText(message)
+
     def _on_extracted(self, payload: tuple) -> None:
         self._extraction, requirements, responses, self._mappings = payload
         self.model.set_items(requirements, responses)
         if self._extraction and self._extraction.pages:
-            self.page_review.setPlainText(self._extraction.pages[0].reviewed_text or self._extraction.pages[0].normalized_text or self._extraction.pages[0].original_text)
-        self.status.setText("추출 및 분석이 완료되었습니다.")
+            previews = []
+            for page in self._extraction.pages:
+                text = page.reviewed_text or page.normalized_text or page.original_text
+                if text.strip():
+                    previews.append(f"[Page {page.page_number}]\n{text.strip()}")
+            self.page_review.setPlainText("\n\n".join(previews))
+        self.progress.setValue(100)
+        if requirements:
+            self.status.setText(f"추출 및 분석이 완료되었습니다. ({len(requirements)}개)")
+        else:
+            self.status.setText("입력한 범위에서 요구사항을 찾지 못했습니다.")
+            QMessageBox.warning(self, "분석 결과", "입력한 범위에서 요구사항을 찾지 못했습니다. 범위와 원문을 확인해 주세요.")
         self._dirty = True
         self._stop_thread()
 
     def _on_failed(self, message: str) -> None:
         self.status.setText(f"오류: {message}")
+        QMessageBox.warning(self, "URS 분석 오류", message)
         self._stop_thread()
 
     def _stop_thread(self) -> None:
         if self._thread:
             self._thread.quit()
             self._thread.wait(1000)
+            self._thread.deleteLater()
         self._thread = None
         self._worker = None
 
@@ -233,8 +501,19 @@ class DQGeneratorWidget(QWidget):
             source_references=(Path(self.source_path.text()),) if self.source_path.text().strip() else (),
             extraction_results=(self._extraction,) if self._extraction else (),
             requirements=tuple(self.model.requirements),
-            mappings=tuple(self._mappings),
-            template_settings=TemplateSettings(Path(self.template_path.text()), Path(self.output_path.text()).parent),
+            corrections={
+                "version_number": self.version_number.text().strip(),
+                "author_name": self.author_name.text().strip(),
+                "author_date": self.author_date.date().toString("yyyy-MM-dd"),
+                "author_position": self.author_position.text().strip(),
+                "vendor_name": self.vendor_name.text().strip(),
+                "logo_path": self.logo_path.text().strip(),
+                "start_requirement": self.start_requirement.text().strip(),
+                "end_requirement": self.end_requirement.text().strip(),
+                "output_filename": self.output_filename.text().strip(),
+            },
+            mappings=build_mappings(tuple(self.model.requirements), self.model.responses),
+            template_settings=TemplateSettings(Path(self.template_path.text()), Path(self.output_directory_input.path())),
         )
 
     def save_project(self) -> None:
@@ -252,23 +531,108 @@ class DQGeneratorWidget(QWidget):
             self.document_number.setText(project.project_info.project_id)
             if project.source_references:
                 self.source_path.setText(str(project.source_references[0]))
+            values = project.corrections
+            self.version_number.setText(values.get("version_number", "00"))
+            self.author_name.setText(values.get("author_name", ""))
+            if values.get("author_date"):
+                self.author_date.setDate(QDate.fromString(values["author_date"], "yyyy-MM-dd"))
+            self.author_position.setText(values.get("author_position", ""))
+            self.vendor_name.setText(values.get("vendor_name", ""))
+            self.logo_path.setText(values.get("logo_path", ""))
+            self.start_requirement.setText(values.get("start_requirement", "6.4"))
+            self.end_requirement.setText(values.get("end_requirement", "6.8"))
+            self.output_filename.setText(values.get("output_filename", ""))
+            if project.template_settings.template_path:
+                self.template_path.setText(str(project.template_settings.template_path))
+            if project.template_settings.output_directory:
+                self.output_directory_input.set_path(project.template_settings.output_directory)
             self.model.set_items(project.requirements, {mapping.source_requirement_ids[0]: mapping.dq_response for mapping in project.mappings if mapping.dq_response and mapping.source_requirement_ids})
             self._extraction = project.extraction_results[0] if project.extraction_results else None
             self._mappings = project.mappings
             self.status.setText("프로젝트를 열었습니다.")
 
     def generate_docx(self) -> None:
+        data = self.current_document_data()
         requirements = tuple(self.model.requirements)
         mappings = build_mappings(requirements, self.model.responses)
-        template = Path(self.template_path.text())
-        output = Path(self.output_path.text())
-        errors = DQProjectValidator().validate_for_generation(self.project_name.text(), requirements, mappings, template, output)
+        output = data.output_path()
+        errors = data.validation_errors()
+        errors.extend(DQProjectValidator().validate_for_generation(data.equipment_name, requirements, mappings, data.template_path, output))
+        if data.template_path.is_file():
+            try:
+                missing = self._generator.missing_placeholders(data.template_path)
+            except InvalidTemplateFormatError as error:
+                errors.append(str(error))
+            else:
+                if missing:
+                    errors.append("필수 Placeholder를 찾을 수 없습니다: " + ", ".join(missing))
         if errors:
-            QMessageBox.warning(self, "생성 전 확인", "\n".join(errors))
+            QMessageBox.warning(self, "생성 전 확인", "\n".join(dict.fromkeys(errors)))
             return
-        self._generator.generate(template, output, {"project_name": self.project_name.text(), "document_number": self.document_number.text()}, requirements, mappings)
+        output = self._resolve_output_conflict(output)
+        if output is None:
+            self.status.setText("문서 생성을 취소했습니다.")
+            return
+        if not confirm_ocr_document_review(self):
+            self.status.setText("문서 검토 경고에서 생성을 취소했습니다.")
+            return
+        context = {
+            "project_name": data.equipment_name,
+            "document_number": data.document_number,
+            "version_number": data.version_number,
+            "equipment_name": data.equipment_name,
+            "author_name": data.author_name,
+            "author_date": format_document_date(data.author_date),
+            "author_position": data.author_position,
+            "vendor_name": data.vendor_name,
+        }
+        self.progress.setValue(80)
+        self.generate_button.setEnabled(False)
+        self.generate_button.setText("Word 생성 중...")
+        self.status.setText("Word 문서 생성 중...")
+        QApplication.processEvents()
+        try:
+            self._generator.generate(
+                data.template_path,
+                output,
+                context,
+                requirements,
+                mappings,
+                logo_path=data.logo_path,
+                validate_required=True,
+            )
+        except Exception as error:
+            self._context.services.resolve(logging.Logger).exception("DQ Word generation failed")
+            QMessageBox.critical(self, "문서 생성 오류", str(error))
+            self.status.setText("Word 문서 생성에 실패했습니다.")
+            return
+        finally:
+            self.generate_button.setEnabled(True)
+            self.generate_button.setText("Word 문서 생성")
+        self.progress.setValue(100)
         self.status.setText(f"DQ 문서를 생성했습니다: {output}")
         self._dirty = False
+
+    def _resolve_output_conflict(self, output: Path) -> Path | None:
+        if not output.exists():
+            return output
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("같은 이름의 파일")
+        dialog.setText(f"이미 파일이 존재합니다:\n{output}")
+        overwrite = dialog.addButton("덮어쓰기", QMessageBox.ButtonRole.AcceptRole)
+        save_as = dialog.addButton("다른 이름으로 저장", QMessageBox.ButtonRole.ActionRole)
+        cancel = dialog.addButton("취소", QMessageBox.ButtonRole.RejectRole)
+        dialog.exec()
+        if dialog.clickedButton() is overwrite:
+            return output
+        if dialog.clickedButton() is save_as:
+            selected, _ = QFileDialog.getSaveFileName(self, "다른 이름으로 저장", str(output), "Word document (*.docx)")
+            if selected:
+                path = Path(selected)
+                return path if path.suffix.lower() == ".docx" else path.with_suffix(".docx")
+        if dialog.clickedButton() is cancel:
+            return None
+        return None
 
     def closeEvent(self, event):  # type: ignore[no-untyped-def]
         if self._dirty:

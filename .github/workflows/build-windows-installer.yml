@@ -2,6 +2,8 @@ name: Build Windows Installer
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
   push:
     branches:
       - main
@@ -12,9 +14,9 @@ permissions:
 
 jobs:
   build-windows-installer:
-    name: Test, build EXE, and package installer
+    name: Test and package Windows release
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     defaults:
       run:
         shell: pwsh
@@ -29,107 +31,79 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install project dependencies
+      - name: Install test dependencies
         run: |
           $ErrorActionPreference = "Stop"
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
-          if ($LASTEXITCODE -ne 0) { Write-Error "::error title=Dependency installation failed::Could not install project dependencies." }
 
-      - name: Run pytest
+      - name: Run complete test suite
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
           $ErrorActionPreference = "Stop"
           python -m pytest -q
-          if ($LASTEXITCODE -ne 0) { Write-Error "::error title=Tests failed::Review this step's pytest output." }
+          if ($LASTEXITCODE -ne 0) { throw "Automated tests failed." }
 
-      - name: Build Windows executable with PyInstaller
-        run: |
-          $ErrorActionPreference = "Stop"
-          python -m PyInstaller --noconfirm --clean --windowed --name Vegas_Total_Solution_Doc --paths src --collect-all vegas_doc --collect-all PySide6 src/main.py
-          if ($LASTEXITCODE -ne 0) { Write-Error "::error title=PyInstaller failed::The Windows executable could not be built." }
-          $exe = "dist/Vegas_Total_Solution_Doc/Vegas_Total_Solution_Doc.exe"
-          if (-not (Test-Path -LiteralPath $exe)) { Write-Error "::error title=Executable missing::Expected $exe." }
-
-      - name: Install Inno Setup
+      - name: Install Inno Setup 6
         run: |
           $ErrorActionPreference = "Stop"
           choco install innosetup --no-progress -y
-          if ($LASTEXITCODE -ne 0) { Write-Error "::error title=Inno Setup installation failed::Chocolatey could not install Inno Setup." }
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup installation failed." }
 
-      - name: Create Inno Setup definition
+      - name: Build optimized PyInstaller distribution
+        env:
+          QT_QPA_PLATFORM: offscreen
+          VEGAS_BUILD_NUMBER: ${{ github.run_number }}
+          VEGAS_BUILD_DATE: ${{ github.event.repository.updated_at }}
+          VEGAS_GIT_COMMIT: ${{ github.sha }}
         run: |
           $ErrorActionPreference = "Stop"
-          New-Item -ItemType Directory -Force -Path installer | Out-Null
-          @'
-          #define MyAppName "Vegas Total Solution Doc"
-          #define MyAppVersion "0.1.0"
-          #define MyAppExeName "Vegas_Total_Solution_Doc.exe"
-
-          [Setup]
-          AppId={{1DAD13F1-148D-4B95-8D15-F4FEBD49676A}
-          AppName={#MyAppName}
-          AppVersion={#MyAppVersion}
-          DefaultDirName={autopf}\Vegas Total Solution Doc
-          DefaultGroupName={#MyAppName}
-          OutputDir=..\dist\installer
-          OutputBaseFilename=Vegas_Total_Solution_Doc_Setup
-          Compression=lzma2
-          SolidCompression=yes
-          ArchitecturesAllowed=x64compatible
-          ArchitecturesInstallIn64BitMode=x64compatible
-          WizardStyle=modern
-          UninstallDisplayIcon={app}\{#MyAppExeName}
-
-          [Files]
-          Source: "..\dist\Vegas_Total_Solution_Doc\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-          [Tasks]
-          Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"
-
-          [Icons]
-          Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-          Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
-
-          [Run]
-          Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
-          '@ | Set-Content -LiteralPath installer/Vegas_Total_Solution_Doc.iss -Encoding utf8
+          cmd /c scripts\build_exe.bat
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller stage failed." }
 
       - name: Build Inno Setup installer
+        env:
+          ISCC_PATH: C:\Program Files (x86)\Inno Setup 6\ISCC.exe
         run: |
           $ErrorActionPreference = "Stop"
-          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6/ISCC.exe"
-          if (-not (Test-Path -LiteralPath $iscc)) { Write-Error "::error title=ISCC missing::Inno Setup compiler was not found at $iscc." }
-          & $iscc "installer/Vegas_Total_Solution_Doc.iss"
-          if ($LASTEXITCODE -ne 0) { Write-Error "::error title=Installer build failed::ISCC failed to compile the installer." }
-          $installer = "dist/installer/Vegas_Total_Solution_Doc_Setup.exe"
-          if (-not (Test-Path -LiteralPath $installer)) { Write-Error "::error title=Installer missing::Expected $installer." }
+          cmd /c scripts\build_installer.bat
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup stage failed." }
 
       - name: Generate checksums and build manifest
         run: |
           $ErrorActionPreference = "Stop"
-          $outputDirectory = "dist/installer"
-          $installer = Join-Path $outputDirectory "Vegas_Total_Solution_Doc_Setup.exe"
-          $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  Vegas_Total_Solution_Doc_Setup.exe" | Set-Content -LiteralPath (Join-Path $outputDirectory "checksums.txt") -Encoding ascii
-          [ordered]@{
-            product = "Vegas Total Solution Doc"
-            version = "0.1.0"
-            artifact = "Vegas_Total_Solution_Doc_Setup.exe"
-            sha256 = $hash
-            commit = "${{ github.sha }}"
-            workflow_run = "${{ github.run_id }}"
-            built_at_utc = (Get-Date).ToUniversalTime().ToString("o")
-          } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $outputDirectory "build_manifest.json") -Encoding utf8
+          .\.build-venv\Scripts\python.exe scripts\generate_release_metadata.py
+          .\.build-venv\Scripts\python.exe scripts\package_size_report.py --after
+          if ($LASTEXITCODE -ne 0) { throw "Release metadata stage failed." }
 
-      - name: Verify release artifact set
+      - name: Enforce installer size policy
         run: |
           $ErrorActionPreference = "Stop"
-          $required = @("dist/installer/Vegas_Total_Solution_Doc_Setup.exe", "dist/installer/checksums.txt", "dist/installer/build_manifest.json")
+          $installer = "dist/installer/Vegas_Total_Solution_Doc_Setup.exe"
+          $sizeMb = (Get-Item -LiteralPath $installer).Length / 1MB
+          "Actual installer size: {0:N2} MB" -f $sizeMb
+          if ($sizeMb -gt 100) {
+            Write-Warning "::warning title=Preferred size exceeded::Installer is $([math]::Round($sizeMb, 2)) MB; the preferred target is 100 MB or less."
+          }
+          if ($sizeMb -gt 120) {
+            Write-Warning "::warning title=Installer size high::Installer is above 120 MB and should be reviewed."
+          }
+          if ($sizeMb -gt 160) {
+            throw "Installer is $([math]::Round($sizeMb, 2)) MB, above the 160 MB hard limit."
+          }
+          Get-Content artifacts/package_size_after.txt
+
+      - name: Verify release files
+        run: |
+          $ErrorActionPreference = "Stop"
+          $required = @(
+            "dist/installer/Vegas_Total_Solution_Doc_Setup.exe",
+            "dist/installer/checksums.txt",
+            "dist/installer/build_manifest.json"
+          )
           $missing = $required | Where-Object { -not (Test-Path -LiteralPath $_) }
-          if ($missing) { Write-Error "::error title=Artifact verification failed::Missing required files: $($missing -join ', ')" }
-          Get-ChildItem -LiteralPath "dist/installer" | Format-Table Name, Length
+          if ($missing) { throw "Missing release files: $($missing -join ', ')" }
 
       - name: Upload Windows installer artifact
         uses: actions/upload-artifact@v4
@@ -139,5 +113,13 @@ jobs:
             dist/installer/Vegas_Total_Solution_Doc_Setup.exe
             dist/installer/checksums.txt
             dist/installer/build_manifest.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload package size report
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vegas-Total-Solution-Doc-Package-Size
+          path: artifacts/package_size_after.txt
           if-no-files-found: error
           retention-days: 30

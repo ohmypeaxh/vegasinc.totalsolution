@@ -85,6 +85,29 @@ def test_clova_payload_headers_success_error_timeout_connection(monkeypatch) -> 
         provider.recognize_page(OCRPageRequest(Path("page.png"), 1, b"abc", "image/png"))
 
 
+def test_clova_groups_fields_using_line_break_metadata() -> None:
+    """CLOVA table cells on the same visual row remain one text line."""
+
+    provider = ClovaOCRProvider(ClovaOCRSettings(), MemorySecretStore())
+    result = provider._parse_response(  # noqa: SLF001 - response contract regression test
+        {
+            "images": [
+                {
+                    "fields": [
+                        {"inferText": "7.1", "inferConfidence": 0.99, "lineBreak": False},
+                        {"inferText": "설치위치 : 1층 멸균준비실", "inferConfidence": 0.98, "lineBreak": True},
+                        {"inferText": "7.2", "inferConfidence": 0.99, "lineBreak": False},
+                        {"inferText": "설치수량 : 1 대", "inferConfidence": 0.98, "lineBreak": True},
+                    ]
+                }
+            ]
+        },
+        9,
+    )
+
+    assert result.text == "7.1 설치위치 : 1층 멸균준비실\n7.2 설치수량 : 1 대"
+
+
 def test_pdf_extraction_searchable_and_scanned_page_isolation(tmp_path) -> None:
     pdf = tmp_path / "mixed.pdf"
     doc = fitz.open()

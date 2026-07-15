@@ -25,5 +25,5 @@ def test_main_window_starts_with_plugins(tmp_path) -> None:
     window = MainWindow(context, PluginManager(PluginLoader(context.settings.plugins_package)))
 
     assert app is not None
-    assert window.plugin_count == 10
+    assert window.plugin_count == 6
     assert window.windowTitle() == "Vegas Total Solution Doc"

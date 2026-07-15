@@ -1,0 +1,245 @@
+"""F&DS ranged parsing, rules, UI, and Word output tests."""
+
+from __future__ import annotations
+
+import base64
+from datetime import date
+from pathlib import Path
+
+from docx import Document
+
+from vegas_doc.models.extraction import DocumentExtractionResult, DocumentKind, ExtractionMethod, PageExtractionMetadata
+from vegas_doc.models.fds_document import FDSDocumentRequest, FDSStatement, FDSTransformationRule
+from vegas_doc.services.fds_generator import (
+    FDSDocumentGenerator,
+    FDSSentenceTransformer,
+    FDSURSParser,
+    transformation_rules_from_config,
+)
+
+
+_PNG_1X1 = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+)
+
+
+def test_fds_sentence_rules_cover_requested_korean_endings() -> None:
+    transformer = FDSSentenceTransformer()
+
+    assert transformer.transform("6.4.1 모서리가 뾰족하지 않아야 한다.") == "모서리가 뾰족하지 않도록 제작한다."
+    assert transformer.transform("작업자가 데이터를 확인할 수 있어야 한다.") == "작업자가 데이터를 확인할 수 있도록 제작한다."
+    assert transformer.transform("표면은 평탄한 구조이어야 한다.") == "표면은 평탄한 구조이도록 제작한다."
+    assert transformer.transform("시스템은 기록을 저장해야 한다.") == "시스템은 기록을 저장하도록 제작한다."
+
+
+def test_fds_sentence_noun_ending_uses_natural_instrumental_particle() -> None:
+    transformer = FDSSentenceTransformer()
+
+    assert transformer.transform("소음: 60dBA.") == "소음: 60dBA로 제작한다."
+    assert transformer.transform("형상: 원형.") == "형상: 원형으로 제작한다."
+    assert transformer.transform("재질: 스틸.") == "재질: 스틸로 제작한다."
+
+
+def test_custom_fds_rule_overrides_default_behavior() -> None:
+    rules = (FDSTransformationRule("적용해야 한다", "적용 가능한 구조로 제작한다."),)
+
+    assert FDSSentenceTransformer(rules).transform("안전 기준을 적용해야 한다.") == "안전 기준을 적용 가능한 구조로 제작한다."
+    assert transformation_rules_from_config([{"source_ending": "한다", "target_ending": "하도록 제작한다."}]) == (
+        FDSTransformationRule("한다", "하도록 제작한다."),
+    )
+
+
+def test_fds_rule_transforms_ending_before_trailing_parenthetical() -> None:
+    transformer = FDSSentenceTransformer((FDSTransformationRule("해야 한다", "하도록 제작한다."),))
+
+    assert transformer.transform("6.4.1 센서를 설치해야 한다. (작업자 안전 고려)") == (
+        "센서를 설치하도록 제작한다. (작업자 안전 고려)"
+    )
+    assert transformer.transform("센서를 설치해야 한다(필요 시)") == "센서를 설치하도록 제작한다. (필요 시)"
+
+
+def test_fds_rule_transforms_every_sentence_boundary_without_reprocessing_targets() -> None:
+    transformer = FDSSentenceTransformer(
+        (
+            FDSTransformationRule("해야 한다", "하도록 제작한다."),
+            FDSTransformationRule("한다", "하도록 제작한다."),
+        )
+    )
+
+    assert transformer.transform("센서를 설치해야 한다. 경보를 제공해야 한다. (운전 중)") == (
+        "센서를 설치하도록 제작한다. 경보를 제공하도록 제작한다. (운전 중)"
+    )
+    assert transformer.transform("인터록을 제공하도록 제작한다. (기본 사양)") == (
+        "인터록을 제공하도록 제작한다. (기본 사양)"
+    )
+
+
+def test_fds_parser_keeps_only_selected_numbered_range(tmp_path: Path) -> None:
+    source = tmp_path / "urs.pdf"
+    page = PageExtractionMetadata(
+        source,
+        2,
+        DocumentKind.SEARCHABLE_PDF,
+        ExtractionMethod.EMBEDDED_TEXT,
+        (
+            "6.3.1 범위 밖 요구사항은 제외해야 한다.\n"
+            "6.4 기계 요구사항\n"
+            "6.4.1 모서리가 뾰족하지 않아야 한다.\n"
+            "6.4.2 작업자가 데이터를 확인할 수 있어야 한다.\n"
+            "6.9.1 종료 범위 밖 요구사항은 제외해야 한다."
+        ),
+    )
+
+    statements = FDSURSParser().parse(DocumentExtractionResult(source, DocumentKind.SEARCHABLE_PDF, (page,)), "6.4", "6.8")
+
+    assert [item.requirement_id for item in statements] == ["6.4.1", "6.4.2"]
+    assert all(item.source_page == 2 for item in statements)
+
+
+def test_fds_parser_recovers_number_cell_separated_from_ocr_text(tmp_path: Path) -> None:
+    source = tmp_path / "scanned-urs.pdf"
+    ocr_text = (
+        "7.\n설계 요구사항\nNo.\n요구사항\n"
+        "7 . 1\n설치위치 : 1층 멸균준비실\n"
+        "7.2\n설치수량 : 1 대\n"
+        "8.\n기능 요구사항\n"
+        "8.1\n패스박스 도어에 인터록 기능이 있어야 한다.\n"
+        "9.\n범위 밖\n9.1\n제외하여야 한다."
+    )
+    page = PageExtractionMetadata(source, 9, DocumentKind.SCANNED_PDF, ExtractionMethod.OCR, ocr_text, ocr_text)
+
+    statements = FDSURSParser().parse(
+        DocumentExtractionResult(source, DocumentKind.SCANNED_PDF, (page,)),
+        "7",
+        "8",
+    )
+
+    assert [item.requirement_id for item in statements] == ["7.1", "7.2", "8.1"]
+    assert statements[0].original_text == "설치위치 : 1층 멸균준비실"
+
+
+def test_fds_parser_keeps_generic_endings_before_parentheses_and_mid_text(tmp_path: Path) -> None:
+    source = tmp_path / "parenthetical-urs.pdf"
+    text = (
+        "7.1 장비를 정지한다. (비상 상황 발생 시)\n"
+        "7.2 경보를 표시한다. 운전자가 상태를 확인한다.\n"
+        "8.1 선택 범위 밖의 요구사항이다."
+    )
+    page = PageExtractionMetadata(source, 4, DocumentKind.SEARCHABLE_PDF, ExtractionMethod.EMBEDDED_TEXT, text)
+
+    statements = FDSURSParser().parse(
+        DocumentExtractionResult(source, DocumentKind.SEARCHABLE_PDF, (page,)),
+        "7.1",
+        "7.2",
+    )
+
+    assert [item.requirement_id for item in statements] == ["7.1", "7.2"]
+
+
+def test_passbox_range_recovers_all_41_rows_with_ocr_number_confusions(tmp_path: Path) -> None:
+    source = tmp_path / "passbox-urs.pdf"
+    confused_numbers = {
+        "7.1": "7.I",
+        "7.8": "7,B",
+        "7.9": "79",
+        "7.10": "7,1O",
+        "7.15": "7.I5",
+        "7.22": "722",
+        "7.30": "7.3O",
+        "7.31": "731",
+        "7.34": "734",
+        "7.37": "7.3T",
+    }
+    lines = ["7. 설계 요구사항"]
+    for index in range(1, 38):
+        number = f"7.{index}"
+        recognized = confused_numbers.get(number, number)
+        content = "1대" if index == 2 else f"설계 요구사항 {index}을 적용해야 한다."
+        lines.append(f"{recognized} {content}")
+    lines.append("B. 기능 요구사항")
+    lines.extend(f"B.{index} 기능 요구사항 {index}을 적용해야 한다." for index in range(1, 5))
+    page = PageExtractionMetadata(
+        source,
+        9,
+        DocumentKind.SCANNED_PDF,
+        ExtractionMethod.OCR,
+        "\n".join(lines),
+    )
+
+    statements = FDSURSParser().parse(
+        DocumentExtractionResult(source, DocumentKind.SCANNED_PDF, (page,)),
+        "7",
+        "8",
+    )
+
+    assert len(statements) == 41
+    assert [item.requirement_id for item in statements] == [
+        *(f"7.{index}" for index in range(1, 38)),
+        *(f"8.{index}" for index in range(1, 5)),
+    ]
+
+
+def test_fds_word_generator_numbers_content_and_formats_malgun_gothic(tmp_path: Path) -> None:
+    template = tmp_path / "fds-template.docx"
+    logo = tmp_path / "logo.png"
+    source = tmp_path / "urs.pdf"
+    logo.write_bytes(_PNG_1X1)
+    source.write_bytes(b"%PDF-1.4\n%%EOF")
+    document = Document()
+    document.add_paragraph("장비: ##장비명## / 문서: ##문서번호## / 날짜: ##작성일##")
+    document.add_paragraph("##로고##")
+    document.add_paragraph("##F&DS내용##")
+    document.save(template)
+    statements = (
+        FDSStatement("6.4.1", 2, "모서리가 뾰족하지 않아야 한다.", "모서리가 뾰족하지 않도록 제작한다."),
+        FDSStatement("6.4.2", 2, "확인할 수 있어야 한다.", "확인할 수 있도록 제작한다."),
+    )
+    request = FDSDocumentRequest(
+        template,
+        source,
+        logo,
+        tmp_path,
+        "Weighing Booth",
+        "FDS-001",
+        date(2026, 7, 13),
+        "6.4",
+        "6.8",
+        statements,
+    )
+
+    output = FDSDocumentGenerator().generate(request)
+
+    rendered = Document(output)
+    text = "\n".join(paragraph.text for paragraph in rendered.paragraphs)
+    assert output.name == "FDS-001_Weighing Booth_FDS_2026.07.13.docx"
+    assert "장비: Weighing Booth / 문서: FDS-001 / 날짜: 2026.07.13" in text
+    assert "5.2.1. 모서리가 뾰족하지 않도록 제작한다." in text
+    assert "5.2.2. 확인할 수 있도록 제작한다." in text
+    assert "##F&DS내용##" not in text
+    assert len(rendered.inline_shapes) == 1
+    generated_paragraphs = [paragraph for paragraph in rendered.paragraphs if paragraph.text.startswith("5.2.")]
+    assert all(paragraph.runs[0].font.name == "맑은 고딕" for paragraph in generated_paragraphs)
+    assert all(paragraph.runs[0].font.size.pt == 10 for paragraph in generated_paragraphs)
+
+
+def test_fds_widget_contains_generator_and_rules_tabs(tmp_path: Path, qapp) -> None:  # type: ignore[no-untyped-def]
+    from vegas_doc.builtin_plugins.fds_generator import FDSGeneratorWidget
+    from vegas_doc.config.defaults import AppSettings
+    from vegas_doc.core.application_context import build_application_context
+    from vegas_doc.core.config_manager import ConfigManager
+
+    context = build_application_context(AppSettings(), data_dir=tmp_path)
+    widget = FDSGeneratorWidget(context)
+    widget.rules_table.item(0, 1).setText("테스트 규칙으로 제작한다.")
+    widget.save_rules()
+
+    assert [widget.tabs.tabText(index) for index in range(widget.tabs.count())] == ["F&DS Generator", "F&DS Rules"]
+    assert widget.urs_input.acceptDrops()
+    assert widget.logo_input.acceptDrops()
+    assert widget.write_date.calendarPopup()
+    assert widget.write_date.displayFormat() == "yyyy.MM.dd"
+    assert widget.document_number.text() == "MD-FDS-##01-26"
+    assert "Pass Box - PB" in widget.document_number_help.text()
+    assert "Clean Booth - CB" in widget.document_number_help.text()
+    assert widget.review_table.minimumHeight() >= 480
+    assert context.services.resolve(ConfigManager).load()["fds_transformation_rules"][0]["target_ending"] == "테스트 규칙으로 제작한다."

@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import sys
+
 from PySide6.QtCore import QThread, Signal
-from PySide6.QtWidgets import QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget
 
 from vegas_doc.core.application_context import ApplicationContext
 from vegas_doc.core.config_manager import ConfigManager
 from vegas_doc.plugins.plugin import Plugin, PluginMetadata
 from vegas_doc.services.clova_ocr import ClovaOCRProvider, ClovaOCRSettings
 from vegas_doc.services.secrets import KeyringSecretStore
+from vegas_doc.version import BUILD_INFO
 
 
 class ConnectionTestWorker(QThread):
@@ -57,10 +60,38 @@ class SettingsWidget(QWidget):
         values = self._config.load()
         self._worker: ConnectionTestWorker | None = None
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(42, 36, 42, 36)
+        layout.setSpacing(8)
+        eyebrow = QLabel("SYSTEM CONFIGURATION")
+        eyebrow.setObjectName("Eyebrow")
+        layout.addWidget(eyebrow)
         title = QLabel("Settings")
         title.setObjectName("PageTitle")
         layout.addWidget(title)
-        form = QFormLayout()
+        subtitle = QLabel("제품 정보와 보안 OCR 연결 설정을 관리합니다.")
+        subtitle.setObjectName("PageSubtitle")
+        layout.addWidget(subtitle)
+        layout.addSpacing(18)
+
+        product_group = QGroupBox("Product Information")
+        product_form = QFormLayout(product_group)
+        for label, value in (
+            ("Product", BUILD_INFO.product),
+            ("Version", BUILD_INFO.version),
+            ("Build", BUILD_INFO.build_number),
+            ("Build Date", BUILD_INFO.build_date),
+            ("Commit", BUILD_INFO.commit),
+            ("Install Path", str(sys.executable)),
+            ("Config Path", str(context.data_dir / context.settings.config_filename)),
+            ("Log Path", str(context.data_dir / context.settings.log_directory_name)),
+        ):
+            field = QLineEdit(value)
+            field.setReadOnly(True)
+            product_form.addRow(label, field)
+        layout.addWidget(product_group)
+
+        ocr_group = QGroupBox("OCR Connection")
+        form = QFormLayout(ocr_group)
         self.provider = QLineEdit("NAVER CLOVA OCR")
         self.provider.setReadOnly(True)
         self.url = QLineEdit(str(values.get("clova_invoke_url", "")))
@@ -73,9 +104,10 @@ class SettingsWidget(QWidget):
         form.addRow("Invoke URL", self.url)
         form.addRow("Secret Key", self.secret)
         form.addRow("Timeout (seconds)", self.timeout)
-        layout.addLayout(form)
+        layout.addWidget(ocr_group)
         buttons = QHBoxLayout()
         save = QPushButton("Save")
+        save.setObjectName("PrimaryAction")
         test = QPushButton("Test Connection")
         save.clicked.connect(self.save)
         test.clicked.connect(self.test_connection)

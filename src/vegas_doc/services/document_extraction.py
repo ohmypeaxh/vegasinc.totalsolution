@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import fitz
@@ -13,6 +14,7 @@ from vegas_doc.services.ocr import OCRService
 
 SUPPORTED_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff"}
 MEANINGFUL_TEXT_LENGTH = 30
+OCR_RENDER_SCALE = 3
 
 
 class PyMuPDFDocumentTextExtractor(DocumentTextExtractor):
@@ -32,10 +34,34 @@ class PyMuPDFDocumentTextExtractor(DocumentTextExtractor):
             return self._extract_image(source_path, policy)
         raise ValueError(f"Unsupported source type: {source_path.suffix}")
 
-    def _extract_pdf(self, source_path: Path, policy: ExtractionPolicy) -> DocumentExtractionResult:
+    def extract_range(
+        self,
+        source_path: Path,
+        document_kind: DocumentKind,
+        policy: ExtractionPolicy,
+        start_section: str,
+        end_section: str,
+    ) -> DocumentExtractionResult:
+        """Extract likely pages for a section range, preferring embedded text."""
+
+        if source_path.suffix.lower() != ".pdf":
+            return self.extract(source_path, document_kind, policy)
+        with fitz.open(source_path) as document:
+            embedded_pages = tuple(page.get_text("text").strip() for page in document)
+        page_numbers = _range_page_numbers(embedded_pages, start_section, end_section)
+        return self._extract_pdf(source_path, policy, page_numbers)
+
+    def _extract_pdf(
+        self,
+        source_path: Path,
+        policy: ExtractionPolicy,
+        page_numbers: set[int] | None = None,
+    ) -> DocumentExtractionResult:
         pages: list[PageExtractionMetadata] = []
         with fitz.open(source_path) as document:
             for index, page in enumerate(document, start=1):
+                if page_numbers is not None and index not in page_numbers:
+                    continue
                 embedded = page.get_text("text").strip()
                 if policy.prefer_embedded_text and _is_meaningful(embedded):
                     pages.append(PageExtractionMetadata(source_path, index, DocumentKind.SEARCHABLE_PDF, ExtractionMethod.EMBEDDED_TEXT, embedded, _normalize(embedded), confidence=1.0))
@@ -70,7 +96,7 @@ class PyMuPDFDocumentTextExtractor(DocumentTextExtractor):
 
 
 def _render_page_png(page: fitz.Page) -> bytes:
-    pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+    pixmap = page.get_pixmap(matrix=fitz.Matrix(OCR_RENDER_SCALE, OCR_RENDER_SCALE), alpha=False)
     return pixmap.tobytes("png")
 
 
@@ -81,3 +107,52 @@ def _is_meaningful(text: str) -> bool:
 
 def _normalize(text: str) -> str:
     return "\n".join(line.strip() for line in text.splitlines() if line.strip())
+
+
+def extraction_failure_message(result: DocumentExtractionResult) -> str | None:
+    """Return an actionable message when no page produced usable text."""
+
+    usable = any(
+        page.extraction_method is not ExtractionMethod.NOT_EXTRACTED
+        and bool((page.reviewed_text or page.normalized_text or page.original_text).strip())
+        for page in result.pages
+    )
+    if usable:
+        return None
+    details = tuple(
+        dict.fromkeys(
+            message
+            for page in result.pages
+            for message in (*page.errors, *page.warnings)
+            if message.strip()
+        )
+    )
+    joined = " ".join(details)
+    if "CLOVA secret key is missing" in joined:
+        return "CLOVA Secret Key가 저장되지 않았습니다. Settings의 OCR 항목에서 Secret Key를 입력하고 저장해 주세요."
+    if "CLOVA Invoke URL is missing" in joined:
+        return "CLOVA Invoke URL이 설정되지 않았습니다. Settings의 OCR 항목에서 URL을 입력하고 저장해 주세요."
+    if details:
+        return "PDF/OCR 텍스트를 추출하지 못했습니다: " + "; ".join(details)
+    return "PDF/OCR 텍스트를 추출하지 못했습니다. 스캔 PDF라면 Settings의 CLOVA OCR 연결을 확인해 주세요."
+
+
+_SECTION_NUMBER = re.compile(r"(?m)^\s*(\d+(?:\.\d+)*)\b")
+
+
+def _range_page_numbers(texts: tuple[str, ...], start: str, end: str) -> set[int]:
+    """Locate likely pages without sending unrelated searchable pages to OCR."""
+
+    from vegas_doc.services.dq_processing import section_in_range
+
+    matched = {
+        index
+        for index, text in enumerate(texts, start=1)
+        if any(section_in_range(value, start, end) for value in _SECTION_NUMBER.findall(text))
+    }
+    if matched:
+        return set(range(min(matched), max(matched) + 1))
+    if any(_is_meaningful(text) for text in texts):
+        return {index for index, text in enumerate(texts, start=1) if _is_meaningful(text)}
+    # With no searchable index, sequential OCR is required to locate the range.
+    return set(range(1, len(texts) + 1))
